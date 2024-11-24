@@ -52,4 +52,4 @@ Build Windows installers with `cargo tauri build`.
 
 MultiMeters is available under the [MIT License](LICENSE).
 
-**Version:** v0.0.1
+**Version:** v0.0.2
