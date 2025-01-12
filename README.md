@@ -2,7 +2,7 @@
 
 MultiMeters is a native Windows tray app that puts AI coding subscription usage in one compact dashboard.
 
-It supports Claude, Cursor, GitHub Copilot, Grok, and OpenRouter.
+It supports Claude, Cursor, GitHub Copilot, Devin, Grok, and OpenRouter.
 
 ## Features
 
@@ -52,4 +52,4 @@ Build Windows installers with `cargo tauri build`.
 
 MultiMeters is available under the [MIT License](LICENSE).
 
-**Version:** v0.0.2
+**Version:** v0.1.0
