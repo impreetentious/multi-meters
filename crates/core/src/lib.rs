@@ -6,6 +6,7 @@ pub mod limits;
 pub mod models;
 pub mod paths;
 pub mod pricing;
+pub mod providers;
 pub mod settings;
 pub mod spend;
 pub use models::*;
