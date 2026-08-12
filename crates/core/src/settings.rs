@@ -38,14 +38,18 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            enabled: BTreeSet::from(["claude".into(), "cursor".into()]),
+            enabled: BTreeSet::from(["claude".into(), "codex".into(), "cursor".into()]),
             order: vec![
                 "claude".into(),
+                "codex".into(),
                 "cursor".into(),
+                "antigravity".into(),
                 "copilot".into(),
                 "devin".into(),
                 "grok".into(),
+                "opencode".into(),
                 "openrouter".into(),
+                "zai".into(),
             ],
             hidden_metrics: BTreeSet::new(),
             on_demand: default_on_demand(),
@@ -77,10 +81,20 @@ impl Default for AppSettings {
 
 fn default_on_demand() -> BTreeSet<String> {
     [
+        "antigravity.claude",
+        "antigravity.claudeWeekly",
         "claude.sonnet",
+        "claude.fable",
         "claude.today",
         "claude.yesterday",
         "claude.last30",
+        "codex.spark",
+        "codex.sparkWeekly",
+        "codex.credits",
+        "codex.rateLimitResets",
+        "codex.today",
+        "codex.yesterday",
+        "codex.last30",
         "cursor.onDemand",
         "cursor.requests",
         "cursor.credits",
@@ -96,10 +110,14 @@ fn default_on_demand() -> BTreeSet<String> {
         "grok.today",
         "grok.yesterday",
         "grok.last30",
+        "opencode.today",
+        "opencode.yesterday",
+        "opencode.last30",
         "openrouter.today",
         "openrouter.week",
         "openrouter.month",
         "openrouter.keyLimit",
+        "zai.webSearches",
     ]
     .into_iter()
     .map(String::from)
@@ -113,11 +131,26 @@ fn default_pins() -> BTreeMap<String, Vec<String>> {
         vec!["claude.session".into(), "claude.weekly".into()],
     );
     m.insert(
+        "codex".into(),
+        vec!["codex.session".into(), "codex.weekly".into()],
+    );
+    m.insert(
         "cursor".into(),
         vec!["cursor.auto".into(), "cursor.api".into()],
     );
     m.insert("copilot".into(), vec!["copilot.premium".into()]);
     m.insert("openrouter".into(), vec!["openrouter.credits".into()]);
+    m.insert(
+        "zai".into(),
+        vec!["zai.session".into(), "zai.weekly".into()],
+    );
+    m.insert(
+        "antigravity".into(),
+        vec![
+            "antigravity.geminiPro".into(),
+            "antigravity.geminiWeekly".into(),
+        ],
+    );
     m
 }
 
@@ -133,7 +166,7 @@ impl AppSettings {
             }
         };
         let migrated_legacy_keys = settings.migrate_legacy_api_keys();
-        for provider in ["openrouter"] {
+        for provider in ["openrouter", "zai"] {
             match paths::app_api_key_checked(provider) {
                 Ok(Some(_)) => {
                     settings.api_key_configured.insert(provider.to_string());

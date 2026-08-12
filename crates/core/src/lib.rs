@@ -1,8 +1,12 @@
 pub mod format;
 pub mod http;
 pub mod json;
+pub mod legacy;
+pub mod limits;
 pub mod models;
 pub mod paths;
+pub mod pricing;
 pub mod settings;
+pub mod spend;
 pub use models::*;
 pub use settings::AppSettings;

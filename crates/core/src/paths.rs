@@ -90,12 +90,52 @@ pub fn claude_home() -> PathBuf {
         .unwrap_or_else(|| home().join(".claude"))
 }
 
+pub fn codex_home() -> PathBuf {
+    std::env::var("CODEX_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| expand_home(&s))
+        .unwrap_or_else(|| {
+            let config = home().join(".config").join("codex");
+            if config.join("auth.json").exists() {
+                config
+            } else {
+                home().join(".codex")
+            }
+        })
+}
+
 pub fn grok_home() -> PathBuf {
     std::env::var("GROK_HOME")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(|s| expand_home(&s))
         .unwrap_or_else(|| home().join(".grok"))
+}
+
+pub fn opencode_data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("OPENCODE_DATA_DIR") {
+        if !dir.trim().is_empty() {
+            return expand_home(&dir);
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        if !xdg.trim().is_empty() {
+            return expand_home(&xdg).join("opencode");
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local = data_local_dir().unwrap_or_else(home).join("opencode");
+        if local.exists() {
+            return local;
+        }
+        home().join(".local/share/opencode")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        home().join(".local/share/opencode")
+    }
 }
 
 pub fn devin_credentials() -> PathBuf {

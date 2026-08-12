@@ -2,7 +2,7 @@
 
 MultiMeters is a native Windows tray app that puts AI coding subscription usage in one compact dashboard.
 
-It supports Claude, Cursor, GitHub Copilot, Devin, Grok, and OpenRouter.
+It supports Claude, Codex, Cursor, GitHub Copilot, Devin, Grok, OpenCode, OpenRouter, Z.ai, and Antigravity.
 
 ## Features
 
@@ -17,7 +17,7 @@ It supports Claude, Cursor, GitHub Copilot, Devin, Grok, and OpenRouter.
 
 Download an MSI or NSIS installer from the latest GitHub release and launch MultiMeters from the Windows tray.
 
-MultiMeters discovers supported local app and CLI credentials automatically. OpenRouter keys can be added in Settings. Credentials never appear in the dashboard API.
+MultiMeters discovers supported local app and CLI credentials automatically. OpenRouter and Z.ai keys can be added in Settings. Credentials never appear in the dashboard API.
 
 ## Use
 
@@ -52,4 +52,4 @@ Build Windows installers with `cargo tauri build`.
 
 MultiMeters is available under the [MIT License](LICENSE).
 
-**Version:** v0.1.0
+**Version:** v0.1.1

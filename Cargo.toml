@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/core"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 authors = ["Sidakpreet Singh"]
@@ -14,7 +14,7 @@ async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "5.0.1"
+dirs = "6"
 keyring = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
 regex = "1"

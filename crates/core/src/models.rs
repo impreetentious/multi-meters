@@ -375,11 +375,15 @@ pub struct LimitsEnvelope {
 pub fn provider_color(id: &str) -> &'static str {
     match id {
         "claude" => "#D97757",
+        "codex" => "#10A37F",
         "cursor" => "#F54E00",
         "copilot" => "#7C3AED",
         "grok" => "#1F1F1F",
+        "opencode" => "#FF5C00",
         "openrouter" => "#6566F1",
+        "zai" => "#000000",
         "devin" => "#3B82F6",
+        "antigravity" => "#4285F4",
         _ => "#737373",
     }
 }
