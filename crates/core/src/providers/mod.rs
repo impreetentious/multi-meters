@@ -4,12 +4,16 @@ use std::sync::Arc;
 use crate::http::Http;
 use crate::models::{ProviderInfo, ProviderSnapshot, WidgetDescriptor};
 
+mod antigravity;
 mod claude;
 mod codex;
 mod copilot;
 mod cursor;
 mod devin;
 mod grok;
+mod opencode;
+mod openrouter;
+mod zai;
 
 #[async_trait]
 pub trait Provider: Send + Sync {
@@ -24,9 +28,13 @@ pub fn catalog() -> Vec<Arc<dyn Provider>> {
         Arc::new(claude::ClaudeProvider::new()),
         Arc::new(codex::CodexProvider::new()),
         Arc::new(cursor::CursorProvider::new()),
+        Arc::new(antigravity::AntigravityProvider::new()),
         Arc::new(copilot::CopilotProvider::new()),
         Arc::new(devin::DevinProvider::new()),
         Arc::new(grok::GrokProvider::new()),
+        Arc::new(opencode::OpenCodeProvider::new()),
+        Arc::new(openrouter::OpenRouterProvider::new()),
+        Arc::new(zai::ZaiProvider::new()),
     ]
 }
 
