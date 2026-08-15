@@ -1,3 +1,5 @@
+pub mod api;
+pub mod engine;
 pub mod format;
 pub mod http;
 pub mod json;
@@ -9,5 +11,7 @@ pub mod pricing;
 pub mod providers;
 pub mod settings;
 pub mod spend;
+
+pub use engine::AppEngine;
 pub use models::*;
 pub use settings::AppSettings;
