@@ -1,0 +1,25 @@
+{
+  "name": "multimeters-ui",
+  "private": true,
+  "version": "0.1.5",
+  "type": "module",
+  "scripts": {
+    "check:version": "node ../scripts/check-version-coherence.mjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "react": "^19",
+    "react-dom": "^19",
+    "typescript": "^5",
+    "vite": "^6"
+  }
+}
