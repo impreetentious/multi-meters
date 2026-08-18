@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 
 use crate::models::{MetricKind, MetricLine, MetricValue, ProgressFormat};
 
@@ -98,33 +98,6 @@ pub fn used_ratio(line: &MetricLine) -> Option<f64> {
             Some((*used / *limit).clamp(0.0, 1.0))
         }
         _ => None,
-    }
-}
-
-pub fn format_reset(at: DateTime<Utc>, countdown: bool) -> String {
-    let now = Utc::now();
-    if countdown {
-        let secs = (at - now).num_seconds();
-        if secs <= 0 {
-            return "Resets soon".into();
-        }
-        let h = secs / 3600;
-        let m = (secs % 3600) / 60;
-        if h >= 48 {
-            format!("Resets in {}d {}h", h / 24, h % 24)
-        } else if h >= 1 {
-            format!("Resets in {h}h {m}m")
-        } else {
-            format!("Resets in {m}m")
-        }
-    } else {
-        let local = at.with_timezone(&Local);
-        let today = Local::now().date_naive();
-        if local.date_naive() == today {
-            format!("Resets today at {}", local.format("%I:%M %p"))
-        } else {
-            format!("Resets {}", local.format("%b %d at %I:%M %p"))
-        }
     }
 }
 

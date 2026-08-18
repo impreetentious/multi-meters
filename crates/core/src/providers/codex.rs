@@ -214,7 +214,7 @@ fn load_auth() -> Option<Value> {
 
 fn save_auth(auth: &Value) -> anyhow::Result<()> {
     let path = paths::codex_home().join("auth.json");
-    paths::write_text(&path, &serde_json::to_string_pretty(auth)?)?;
+    paths::write_secret_text(&path, &serde_json::to_string_pretty(auth)?)?;
     Ok(())
 }
 

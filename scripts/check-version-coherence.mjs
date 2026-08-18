@@ -64,6 +64,17 @@ if (has("crates/cli/src/main.rs") && !read("crates/cli/src/main.rs").includes('e
   errors.push("the CLI must derive its version from CARGO_PKG_VERSION");
 }
 
+if (version && has(".github/ISSUE_TEMPLATE/bug.yml")) {
+  const placeholder = read(".github/ISSUE_TEMPLATE/bug.yml").match(
+    /placeholder:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$/m,
+  )?.[1];
+  if (placeholder !== version) {
+    errors.push(
+      `.github/ISSUE_TEMPLATE/bug.yml version placeholder ${placeholder ?? "missing"} != ${version}`,
+    );
+  }
+}
+
 if (errors.length) {
   console.error("version-coherence FAILED:");
   for (const error of errors) console.error(` - ${error}`);

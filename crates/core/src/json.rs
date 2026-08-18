@@ -5,10 +5,6 @@ pub fn obj(v: &Value) -> Option<&serde_json::Map<String, Value>> {
     v.as_object()
 }
 
-pub fn get<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
-    v.get(key)
-}
-
 pub fn num(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => n.as_f64().or_else(|| n.as_i64().map(|i| i as f64)),
@@ -98,13 +94,6 @@ pub fn jwt_exp(token: &str) -> Option<DateTime<Utc>> {
     let payload = jwt_payload(token)?;
     let exp = num_at(&payload, "exp")?;
     Utc.timestamp_opt(exp as i64, 0).single()
-}
-
-pub fn jwt_sub(token: &str) -> Option<String> {
-    jwt_payload(token)?
-        .get("sub")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
 }
 
 pub fn title_case(raw: &str) -> String {

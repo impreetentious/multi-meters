@@ -105,18 +105,6 @@ impl MetricLine {
         matches!(self, Self::Badge { label, .. } if label == "Error")
     }
 
-    pub fn progress(label: &str, used: f64, limit: f64, format: ProgressFormat) -> Self {
-        Self::Progress {
-            label: label.to_string(),
-            used,
-            limit,
-            format,
-            resets_at: None,
-            period_duration_ms: None,
-            color_hex: None,
-        }
-    }
-
     pub fn percent(
         label: &str,
         used: f64,
@@ -364,12 +352,6 @@ pub struct UsageNotification {
     pub id: String,
     pub title: String,
     pub body: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LimitsEnvelope {
-    pub providers: serde_json::Value,
-    pub generated_at: DateTime<Utc>,
 }
 
 pub fn provider_color(id: &str) -> &'static str {

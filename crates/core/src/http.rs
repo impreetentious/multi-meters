@@ -47,7 +47,7 @@ impl Http {
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(20))
             .connect_timeout(Duration::from_secs(10))
-            .user_agent("MultiMeters/0.1");
+            .user_agent(concat!("MultiMeters/", env!("CARGO_PKG_VERSION")));
         if let Some(url) = proxy {
             builder = builder.proxy(Proxy::all(&url).context("invalid proxy URL")?);
         }

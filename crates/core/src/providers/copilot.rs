@@ -163,6 +163,12 @@ fn load_token() -> Option<String> {
         editor_paths.push(config.join("github-copilot/apps.json"));
         editor_paths.push(config.join("github-copilot/hosts.json"));
     }
+    // On Windows the editor plugins write under %LOCALAPPDATA%, not the roaming config root
+    // `config_dir` resolves to. Every other Windows-aware provider here checks both.
+    if let Some(local) = dirs::data_local_dir() {
+        editor_paths.push(local.join("github-copilot/apps.json"));
+        editor_paths.push(local.join("github-copilot/hosts.json"));
+    }
     for path in editor_paths {
         if let Some(text) = paths::read_text(&path) {
             if let Ok(v) = serde_json::from_str::<Value>(&text) {

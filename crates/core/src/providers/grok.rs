@@ -66,7 +66,9 @@ impl Provider for GrokProvider {
     }
 
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
-        let (file, entries) = match load_entries() {
+        // One working copy for the whole sweep: a later entry's write must carry forward the
+        // rotated credentials an earlier entry already persisted, not revert them.
+        let (mut working_file, entries) = match load_entries() {
             Some(v) => v,
             None => {
                 return ProviderSnapshot::err(&self.info, "Grok not logged in. Run `grok login`.")
@@ -75,7 +77,6 @@ impl Provider for GrokProvider {
         let mut saw_expired = false;
 
         for (key, mut entry) in entries {
-            let mut working_file = file.clone();
             let mut token = str_at(&entry, "key").unwrap_or("").trim().to_string();
             if token.is_empty() {
                 continue;
@@ -254,7 +255,9 @@ async fn refresh_entry(
 
     match serde_json::to_string_pretty(file) {
         Ok(text) => {
-            if let Err(error) = paths::write_text(&paths::grok_home().join("auth.json"), &text) {
+            if let Err(error) =
+                paths::write_secret_text(&paths::grok_home().join("auth.json"), &text)
+            {
                 tracing::warn!(%error, "could not persist refreshed Grok credentials");
             }
         }

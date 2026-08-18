@@ -333,7 +333,7 @@ fn save_oauth(oauth: &Value) -> anyhow::Result<()> {
         "scopes": oauth.get("scopes"),
     });
     root["claudeAiOauth"] = mapped;
-    paths::write_text(&file, &serde_json::to_string_pretty(&root)?)?;
+    paths::write_secret_text(&file, &serde_json::to_string_pretty(&root)?)?;
     Ok(())
 }
 

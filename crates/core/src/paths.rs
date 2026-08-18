@@ -169,21 +169,26 @@ pub fn pi_sessions() -> PathBuf {
         .unwrap_or_else(|| home().join(".pi/agent/sessions"))
 }
 
-pub fn first_existing(paths: &[PathBuf]) -> Option<PathBuf> {
-    paths.iter().find(|p| p.exists()).cloned()
-}
-
 pub fn read_text(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
-}
-
-pub fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
-    write_bytes_atomic(path, text.as_bytes())
 }
 
 pub fn write_json_atomic<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Result<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
     write_bytes_atomic(path, &bytes)?;
+    Ok(())
+}
+
+/// Write a file that holds credentials. Unlike [`write_json_atomic`] this keeps no `.bak`
+/// sibling — a recoverable copy of a token is a second place for it to leak — and restricts
+/// the file to the current user on platforms with Unix permissions.
+pub fn write_secret_text(path: &Path, text: &str) -> std::io::Result<()> {
+    write_secret_bytes(path, text.as_bytes())
+}
+
+pub fn write_secret_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    write_secret_bytes(path, &bytes)?;
     Ok(())
 }
 
@@ -219,11 +224,7 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("data");
-    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    let temporary = temporary_path(path);
     let backup = backup_path(path);
     let mut file = OpenOptions::new()
         .create(true)
@@ -256,6 +257,58 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return Err(error);
     }
     Ok(())
+}
+
+fn write_secret_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = temporary_path(path);
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&temporary)?;
+    // `mode` only applies when the open actually creates the file, so re-assert it: a leftover
+    // temporary from a crashed run must not hand its looser permissions to the new credential.
+    #[cfg(unix)]
+    let written = file
+        .set_permissions(
+            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+        )
+        .and_then(|()| file.write_all(bytes))
+        .and_then(|()| file.sync_all());
+    #[cfg(not(unix))]
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = written {
+        remove_quietly(&temporary);
+        return Err(error);
+    }
+    // `rename` replaces the target atomically, so a credential file never needs a `.bak`
+    // fallback. Retire any backup an earlier release left beside it.
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        remove_quietly(&temporary);
+        return Err(error);
+    }
+    remove_quietly(&backup_path(path));
+    Ok(())
+}
+
+fn remove_quietly(path: &Path) {
+    if let Err(error) = std::fs::remove_file(path) {
+        if error.kind() != ErrorKind::NotFound {
+            tracing::warn!(%error, path = %path.display(), "could not remove a temporary or stale credential file");
+        }
+    }
+}
+
+fn temporary_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("data");
+    path.with_file_name(format!(".{name}.{}.tmp", std::process::id()))
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -344,6 +397,38 @@ pub fn set_app_api_key(provider: &str, value: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_writes_leave_no_readable_backup_copy() {
+        let directory = std::env::temp_dir().join(format!(
+            "multimeters-secret-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = directory.join("auth.json");
+        // A backup left behind by an earlier release must be cleaned up, not preserved.
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(backup_path(&path), b"{\"stale\":\"token\"}").unwrap();
+
+        write_secret_text(&path, "{\"token\":\"first\"}").unwrap();
+        write_secret_text(&path, "{\"token\":\"second\"}").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\"token\":\"second\"}"
+        );
+        assert!(!backup_path(&path).exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "credentials must stay owner-only");
+        }
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
 
     #[test]
     fn unwraps_go_keyring_values_and_rejects_broken_wrappers() {

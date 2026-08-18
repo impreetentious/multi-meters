@@ -461,7 +461,7 @@ fn cache_access_token(auth: &AntigravityAuth) {
         "credentialFingerprint": fingerprint,
     });
     if let Err(error) =
-        paths::write_json_atomic(&paths::app_data().join("antigravity/auth.json"), &value)
+        paths::write_secret_json(&paths::app_data().join("antigravity/auth.json"), &value)
     {
         tracing::warn!(%error, "could not cache refreshed Antigravity token");
     }

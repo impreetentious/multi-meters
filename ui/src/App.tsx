@@ -669,7 +669,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        <span>v{dashboard?.version ?? "0.1.0"}</span>
+        <span>{dashboard ? `v${dashboard.version}` : ""}</span>
         <button className="countdown grow" onClick={() => void refreshAll()}>{dashboard ? `Next update in ${Math.ceil(dashboard.next_refresh_in_secs / 60)}m` : ""}</button>
         <button className={screen === "customize" ? "active" : ""} onClick={() => setScreen("customize")}>Customize</button>
         <button className={screen === "settings" ? "active" : ""} onClick={() => setScreen("settings")}>Settings</button>

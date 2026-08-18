@@ -1,9 +1,12 @@
+# Normalize to LF in the repository; check out LF everywhere except Windows scripts.
 * text=auto eol=lf
 
+# Windows shells require CRLF to parse these correctly.
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
+# Never diffed or line-ending-normalized.
 *.ico binary
 *.png binary
 *.jpg binary

@@ -4,7 +4,7 @@ Thank you for improving MultiMeters.
 
 ## Before opening a change
 
-- Search existing issues and pull requests for related work.
+- Search existing issues and pull requests for related work; the bug and feature templates cover most cases.
 - Keep changes focused and explain the user-facing reason for them.
 - Never include API keys, access tokens, credential files, or private usage logs.
 - Add regression coverage for behavior changes where practical.
