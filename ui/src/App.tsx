@@ -510,6 +510,7 @@ function SettingsScreen({
       <h3>Dashboard</h3>
       <label className="setting"><span>Show Total Spend</span><Toggle label="Show Total Spend" checked={settings.show_total_spend} onChange={(checked) => void onPatch({ show_total_spend: checked })} /></label>
       <label className="setting"><span>Refresh Interval</span><select value={settings.refresh_interval_minutes} onChange={(event) => void onPatch({ refresh_interval_minutes: Number(event.target.value) as Settings["refresh_interval_minutes"] })}><option value={1}>1 minute</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>60 minutes</option></select></label>
+      <label className="setting"><span>Close When Unfocused</span><Toggle label="Close When Unfocused" checked={settings.hide_on_blur} onChange={(checked) => void onPatch({ hide_on_blur: checked })} /></label>
       <label className="setting"><span>Launch at Login</span><Toggle label="Launch at Login" checked={settings.launch_at_login} onChange={(checked) => void onPatch({ launch_at_login: checked })} /></label>
       <div className="setting stacked"><span>Global Shortcut</span><div className="inline-input"><input value={shortcut} placeholder="Ctrl+Shift+M" onChange={(event) => setShortcut(event.target.value)} /><button onClick={() => void onPatch({ global_shortcut: shortcut.trim() || null })}>Save</button></div></div>
 

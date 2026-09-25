@@ -13,6 +13,9 @@ pub struct AppSettings {
     pub pinned: BTreeMap<String, Vec<String>>,
     pub expanded: BTreeSet<String>,
     pub show_total_spend: bool,
+    /// Whether the flyout closes as soon as it loses focus. Turning this off lets it stay open
+    /// beside the editor, which is the only way to read it while working or copy from it.
+    pub hide_on_blur: bool,
     pub launch_at_login: bool,
     pub global_shortcut: Option<String>,
     pub theme: String,
@@ -56,6 +59,7 @@ impl Default for AppSettings {
             pinned: default_pins(),
             expanded: BTreeSet::new(),
             show_total_spend: true,
+            hide_on_blur: true,
             launch_at_login: false,
             global_shortcut: Some("Ctrl+Shift+M".into()),
             theme: "system".into(),
@@ -323,6 +327,10 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(older).expect("older settings parse");
         assert_eq!(settings.theme, "dark", "saved values still win");
         assert_eq!(settings.refresh_interval_minutes, 15);
+        assert!(
+            settings.hide_on_blur,
+            "the flyout still closes on blur by default"
+        );
         assert!(settings.show_total_spend);
         assert_eq!(settings.global_shortcut.as_deref(), Some("Ctrl+Shift+M"));
         assert!(

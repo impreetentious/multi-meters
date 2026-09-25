@@ -121,6 +121,7 @@ export type Settings = {
   pinned: Record<string, string[]>;
   expanded: string[];
   show_total_spend: boolean;
+  hide_on_blur: boolean;
   launch_at_login: boolean;
   global_shortcut?: string | null;
   theme: "system" | "dark" | "light";

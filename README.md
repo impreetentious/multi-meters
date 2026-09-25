@@ -8,8 +8,8 @@ It supports Claude, Codex, Cursor, GitHub Copilot, Devin, Grok, OpenCode, OpenRo
 
 - Live quota meters, reset countdowns, pacing and stale-data warnings
 - Daily and 30-day cost and token totals from supported local usage logs
-- Configurable providers, metrics, ordering, pins, theme, density and refresh cadence
-- Windows tray controls, launch at login, global shortcut and quota notifications
+- Configurable providers, metrics, ordering, pins, theme, density, refresh cadence and flyout behaviour
+- Windows tray controls with a live tooltip, launch at login, global shortcut and quota notifications
 - Secure API-key storage through Windows Credential Manager
 - A read-only loopback API and script-friendly CLI
 
@@ -21,7 +21,9 @@ MultiMeters discovers supported local app and CLI credentials automatically. Ope
 
 ## Use
 
-Left-click the tray icon to toggle the dashboard. Right-click it for Open, Settings and Quit. Press `Esc` to hide the flyout and `Ctrl+R` to refresh.
+Left-click the tray icon to toggle the dashboard. Right-click it for Open, Settings and Quit. Hovering it shows your pinned meters without opening the flyout. Press `Esc` to hide the flyout and `Ctrl+R` to refresh.
+
+The flyout closes as soon as it loses focus. Turn off **Close When Unfocused** in Settings to keep it open beside your editor.
 
 The local API listens on `http://127.0.0.1:6736` and exposes normalized usage at `/v1/limits`. The companion CLI prints the same data:
 
@@ -67,4 +69,4 @@ Apache-2.0 © 2024-2026 Sidakpreet Singh — see [LICENSE](LICENSE).
 
 ---
 
-**Version:** v0.2.5
+**Version:** v0.2.6

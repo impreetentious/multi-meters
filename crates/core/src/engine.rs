@@ -633,6 +633,22 @@ impl AppEngine {
         }
     }
 
+    /// One-line-per-pin summary for the tray tooltip, so the numbers are readable on hover
+    /// without opening the flyout. Capped because the Windows shell truncates a long tooltip.
+    pub async fn tray_summary(&self) -> String {
+        const MAX_TOOLTIP_CHARS: usize = 120;
+        let dashboard = self.dashboard().await;
+        let mut summary = String::from("MultiMeters");
+        for pin in &dashboard.pins {
+            let line = format!("\n{} — {}", pin.title, pin.text);
+            if summary.chars().count() + line.chars().count() > MAX_TOOLTIP_CHARS {
+                break;
+            }
+            summary.push_str(&line);
+        }
+        summary
+    }
+
     pub fn provider_ids(&self) -> Vec<String> {
         self.providers
             .iter()
@@ -928,6 +944,7 @@ fn validate_patch_keys(patch: &serde_json::Value) -> anyhow::Result<()> {
         "pinned",
         "expanded",
         "show_total_spend",
+        "hide_on_blur",
         "launch_at_login",
         "global_shortcut",
         "theme",
@@ -1178,6 +1195,29 @@ mod tests {
         assert_eq!(
             provider.snapshot.as_ref().unwrap().plan.as_deref(),
             Some("Max")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tray_tooltip_lists_pins_and_stays_within_the_shell_limit() {
+        let mut settings = stub_settings();
+        settings.pinned = std::collections::BTreeMap::from([(
+            "claude".to_string(),
+            vec!["claude.session".to_string(), "claude.weekly".to_string()],
+        )]);
+        let summary = stub_engine(settings).tray_summary().await;
+        assert_eq!(
+            summary,
+            "MultiMeters\nClaude Session — 4% left\nClaude Weekly — 80% left"
+        );
+        assert!(summary.chars().count() <= 120);
+    }
+
+    #[tokio::test]
+    async fn the_tray_tooltip_falls_back_to_the_app_name_without_pins() {
+        assert_eq!(
+            stub_engine(stub_settings()).tray_summary().await,
+            "MultiMeters"
         );
     }
 

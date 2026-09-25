@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{fs::OpenOptions, io::Write, sync::Mutex};
 
@@ -14,9 +15,26 @@ use tauri_plugin_positioner::{Position, WindowExt};
 /// Upper bound on how long the background loop sleeps between due-time checks.
 const REFRESH_TICK_SECS: u64 = 20;
 
+/// Identifies the tray icon so its tooltip can be refreshed after each fetch.
+const TRAY_ID: &str = "multimeters";
+
+/// Put the pinned meters on the tray tooltip, so the numbers are readable on hover.
+async fn update_tray_tooltip(app: &AppHandle, engine: &AppEngine) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    warn_result(
+        tray.set_tooltip(Some(engine.tray_summary().await)),
+        "update the tray tooltip",
+    );
+}
+
 struct State {
     engine: Arc<AppEngine>,
     notified: Arc<Mutex<AlertLog>>,
+    /// Mirrors `AppSettings::hide_on_blur`. The window event handler runs outside the async
+    /// runtime, so it reads the flag here rather than awaiting the settings lock.
+    hide_on_blur: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -32,6 +50,7 @@ async fn refresh_all(
 ) -> Result<Dashboard, String> {
     state.engine.refresh_all(force).await;
     deliver_notifications(&app, &state.engine, &state.notified).await;
+    update_tray_tooltip(&app, &state.engine).await;
     Ok(state.engine.dashboard().await)
 }
 
@@ -44,6 +63,7 @@ async fn refresh_one(
 ) -> Result<Dashboard, String> {
     state.engine.refresh_one(&id, force).await?;
     deliver_notifications(&app, &state.engine, &state.notified).await;
+    update_tray_tooltip(&app, &state.engine).await;
     Ok(state.engine.dashboard().await)
 }
 
@@ -65,6 +85,11 @@ async fn patch_settings(
         .await
         .map_err(|error| error.to_string())?;
 
+    if patch.get("hide_on_blur").is_some() {
+        state
+            .hide_on_blur
+            .store(settings.hide_on_blur, Ordering::Relaxed);
+    }
     if patch.get("launch_at_login").is_some() {
         if let Err(error) = set_autostart(&app, settings.launch_at_login) {
             let rollback = state
@@ -138,7 +163,12 @@ async fn reset_all_settings(
     }
 
     match state.engine.reset_all_settings().await {
-        Ok(settings) => Ok(settings),
+        Ok(settings) => {
+            state
+                .hide_on_blur
+                .store(settings.hide_on_blur, Ordering::Relaxed);
+            Ok(settings)
+        }
         Err(error) => {
             let mut message = format!("Could not reset settings: {error}");
             message = append_rollback_error(
@@ -404,11 +434,13 @@ pub fn run() {
             let seed_engine = Arc::clone(&engine);
             let seed_app = app.handle().clone();
             let notified = Arc::new(Mutex::new(AlertLog::default()));
+            let hide_on_blur = Arc::new(AtomicBool::new(settings.hide_on_blur));
             let seed_notified = Arc::clone(&notified);
             tauri::async_runtime::spawn(async move {
                 seed_engine.seed_if_needed().await;
                 seed_engine.refresh_all(true).await;
                 deliver_notifications(&seed_app, &seed_engine, &seed_notified).await;
+                update_tray_tooltip(&seed_app, &seed_engine).await;
                 warn_result(
                     seed_app.emit("dashboard-updated", ()),
                     "notify the flyout after initial refresh",
@@ -440,13 +472,18 @@ pub fn run() {
                         continue;
                     }
                     deliver_notifications(&loop_app, &loop_engine, &loop_notified).await;
+                    update_tray_tooltip(&loop_app, &loop_engine).await;
                     warn_result(
                         loop_app.emit("dashboard-updated", ()),
                         "notify the flyout after background refresh",
                     );
                 }
             });
-            app.manage(State { engine, notified });
+            app.manage(State {
+                engine,
+                notified,
+                hide_on_blur: Arc::clone(&hide_on_blur),
+            });
 
             let show = MenuItem::with_id(app, "show", "Open MultiMeters", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
@@ -457,7 +494,7 @@ pub fn run() {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("the application icon is missing"))?;
 
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id(TRAY_ID)
                 .icon(icon)
                 .tooltip("MultiMeters")
                 .menu(&menu)
@@ -485,6 +522,9 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::Focused(false) => {
+                        if !hide_on_blur.load(Ordering::Relaxed) {
+                            return;
+                        }
                         if let Some(window) = app_handle.get_webview_window("main") {
                             warn_result(window.hide(), "hide the unfocused flyout");
                         }
