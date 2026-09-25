@@ -557,6 +557,7 @@ impl AppEngine {
                 json!({
                     "id": provider.info().id,
                     "displayName": provider.info().display_name,
+                    "icon": provider.info().icon,
                     "enabled": inner.settings.is_enabled(&provider.info().id),
                     "widgets": provider.widgets(),
                 })

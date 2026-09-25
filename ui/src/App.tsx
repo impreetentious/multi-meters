@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -78,6 +78,46 @@ function resetLabel(iso: string | undefined, countdown: boolean, timeFormat: Set
   })}`;
 }
 
+// The stylesheet defines one light palette and one dark palette. Resolving the "system"
+// preference to a concrete value here keeps a `prefers-color-scheme` copy of the palette from
+// having to shadow it.
+function useResolvedTheme(preference: Settings["theme"]): "light" | "dark" {
+  const query = () => window.matchMedia?.("(prefers-color-scheme: dark)");
+  const [systemDark, setSystemDark] = useState(() => query()?.matches ?? true);
+  useEffect(() => {
+    const media = query();
+    if (!media) return;
+    const update = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    setSystemDark(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  if (preference === "system") return systemDark ? "dark" : "light";
+  return preference;
+}
+
+function nextUpdateLabel(seconds: number, refreshing: boolean) {
+  if (refreshing) return "Updating…";
+  if (seconds <= 0) return "Update due";
+  if (seconds < 60) return `Next update in ${seconds}s`;
+  return `Next update in ${Math.ceil(seconds / 60)}m`;
+}
+
+// A missing or unreadable icon should leave a gap, not a broken-image glyph.
+function ProviderIcon({ icon, size }: { icon: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <i className="icon-fallback" style={size ? { width: size, height: size } : undefined} aria-hidden="true" />;
+  return (
+    <img
+      src={`/icons/${icon}.svg`}
+      alt=""
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function LineView({
   widget,
   settings,
@@ -127,6 +167,7 @@ function LineView({
           aria-valuemin={0}
           aria-valuemax={line.limit}
           aria-valuenow={Math.min(line.used, line.limit)}
+          aria-valuetext={usedLeft(line, settings.show_usage_as === "used")}
         >
           <div
             className="fill"
@@ -181,10 +222,16 @@ function LineView({
     return (
       <div className="row">
         <div className="title">{widget.title}</div>
-        <div className="chart" aria-label={`${widget.title} chart`}>
-          {line.points.map((point) => (
+        <div
+          className="chart"
+          role="img"
+          aria-label={`${widget.title}: ${line.points
+            .map((point) => `${point.label} ${point.value_label ?? fmtNum(point.value)}`)
+            .join(", ")}`}
+        >
+          {line.points.map((point, index) => (
             <i
-              key={point.label}
+              key={`${point.label}:${index}`}
               title={`${point.label}: ${point.value_label ?? fmtNum(point.value)}`}
               style={{ height: `${Math.max(4, (point.value / maximum) * 100)}%` }}
             />
@@ -230,17 +277,20 @@ function ProviderCard({
   return (
     <section className="card">
       <div className="card-h">
-        <img src={`/icons/${provider.info.icon}.svg`} alt="" />
+        <ProviderIcon icon={provider.info.icon} />
         <span className="name">{provider.info.display_name}</span>
         {provider.snapshot?.plan && <span className="plan">{provider.snapshot.plan}</span>}
         {provider.snapshot?.stale && <span className="stale">Outdated</span>}
-        {provider.snapshot?.warning && <span className="warning-mark">!</span>}
         <span className="grow" />
         <button className="icon-btn small" disabled={busy} onClick={() => void onRefresh()} aria-label={`Refresh ${provider.info.display_name}`}>
           ↻
         </button>
         {hasDetails && (
-          <button className="icon-btn small" onClick={() => void toggleExpanded()}>
+          <button
+            className="icon-btn small"
+            aria-expanded={provider.expanded}
+            onClick={() => void toggleExpanded()}
+          >
             {provider.expanded ? "Less" : "More"}
           </button>
         )}
@@ -284,6 +334,13 @@ function sliceMetric(slice: SpendSlice, metric: Settings["total_spend_metric"]) 
   return slice.dollars;
 }
 
+// What each arc of the ring is sized by. Cost and tokens are additive, so a share of the total
+// is meaningful. A blended rate is not — rates do not sum — so under Cost / MTok the ring shows
+// the token volume the rates are averaged over, and the legend carries each provider's rate.
+function sliceWeight(slice: SpendSlice, metric: Settings["total_spend_metric"]) {
+  return metric === "cost" ? slice.dollars : slice.tokens;
+}
+
 function TotalSpendCard({
   total,
   settings,
@@ -293,13 +350,17 @@ function TotalSpendCard({
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => Promise<void>;
 }) {
-  const sum = total.slices.reduce((value, slice) => value + sliceMetric(slice, total.metric), 0);
+  const sum = total.slices.reduce((value, slice) => value + sliceWeight(slice, total.metric), 0);
   const center =
     total.metric === "tokens"
       ? `${fmtNum(total.value)} tokens`
       : total.metric === "cost_per_million"
         ? `${fmtMoney(total.value)} / MTok`
         : fmtMoney(total.value);
+  const shareOf = total.metric === "cost" ? "cost" : "tokens";
+  const ringLabel = `Share of ${shareOf} by provider: ${total.slices
+    .map((slice) => `${slice.display_name} ${Math.round((sliceWeight(slice, total.metric) / (sum || 1)) * 100)}%`)
+    .join(", ")}`;
   return (
     <section className="card total-card">
       <div className="card-h spend-controls">
@@ -322,11 +383,11 @@ function TotalSpendCard({
       ) : (
         <div className="ring-wrap">
           <div className="ring-stack">
-            <svg className="ring" viewBox="0 0 36 36" aria-label="Total usage breakdown">
+            <svg className="ring" viewBox="0 0 36 36" role="img" aria-label={ringLabel}>
               {(() => {
                 let accumulated = 0;
                 return total.slices.map((slice) => {
-                  const fraction = sum > 0 ? sliceMetric(slice, total.metric) / sum : 0;
+                  const fraction = sum > 0 ? sliceWeight(slice, total.metric) / sum : 0;
                   const dash = `${fraction * 100} ${100 - fraction * 100}`;
                   const rotation = accumulated * 360;
                   accumulated += fraction;
@@ -365,12 +426,58 @@ function TotalSpendCard({
           </div>
         </div>
       )}
+      {total.metric === "cost_per_million" && total.slices.length > 0 && (
+        <div className="source-note">Ring shows each provider's share of tokens; the rate is a blended average.</div>
+      )}
     </section>
   );
 }
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
   return <input aria-label={label} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />;
+}
+
+// The flyout hides itself whenever it loses focus, so a native `window.confirm` would take the
+// window down with it. Confirmations have to live inside the webview.
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => confirmRef.current?.focus(), []);
+  return (
+    <div className="modal-scrim" onClick={onCancel}>
+      <div
+        className="modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onCancel();
+          }
+        }}
+      >
+        <h4>{title}</h4>
+        <p>{body}</p>
+        <div className="modal-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button ref={confirmRef} className="danger-fill" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SettingsScreen({
@@ -389,6 +496,7 @@ function SettingsScreen({
   const [shortcut, setShortcut] = useState(settings.global_shortcut ?? "");
   const [openRouterKey, setOpenRouterKey] = useState("");
   const [zaiKey, setZaiKey] = useState("");
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const saveKey = async (provider: string, value: string, clear: () => void) => {
     try {
       await onApiKey(provider, value);
@@ -427,7 +535,20 @@ function SettingsScreen({
 
       <h3>Advanced</h3>
       <div className="setting"><span>Local API</span><code>127.0.0.1:6736</code></div>
-      <div className="button-row"><button onClick={() => void invoke("reveal_log").catch(onError)}>Reveal Log</button><button className="danger-text" onClick={() => { if (window.confirm("Reset all MultiMeters settings and customization? API keys and cached usage will be kept.")) void onReset(); }}>Reset All Settings…</button></div>
+      <div className="button-row"><button onClick={() => void invoke("reveal_log").catch(onError)}>Reveal Log</button><button className="danger-text" onClick={() => setConfirmingReset(true)}>Reset All Settings…</button></div>
+
+      {confirmingReset && (
+        <ConfirmDialog
+          title="Reset all settings?"
+          body="Providers, metrics, pins and appearance go back to their defaults. Saved API keys and cached usage are kept."
+          confirmLabel="Reset"
+          onCancel={() => setConfirmingReset(false)}
+          onConfirm={() => {
+            setConfirmingReset(false);
+            void onReset();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -488,7 +609,7 @@ function Customize({
       {data.providers.map((provider, index) => (
         <section className="card" key={provider.id}>
           <div className="provider-row">
-            <img src={`/icons/${provider.id}.svg`} alt="" />
+            <ProviderIcon icon={provider.icon} />
             <b>{provider.displayName}</b>
             <span className="grow" />
             <button disabled={index === 0} onClick={() => void move(provider.id, -1).catch(onError)}>↑</button>
@@ -504,7 +625,7 @@ function Customize({
                 <span>{widget.title}</span>
                 <span className="grow" />
                 {visible && <select aria-label={`${widget.title} placement`} value={data.settings.on_demand.includes(widget.id) ? "demand" : "always"} onChange={(event) => void setPlacement(widget.id, event.target.value === "demand").catch(onError)}><option value="always">Always</option><option value="demand">On Demand</option></select>}
-                {widget.pinnable && <button className="star" aria-label={`${pinned ? "Unpin" : "Pin"} ${widget.title}`} onClick={() => void pin(provider.id, widget.id).catch(onError)}>{pinned ? "★" : "☆"}</button>}
+                {widget.pinnable ? <button className="star" aria-label={`${pinned ? "Unpin" : "Pin"} ${widget.title}`} onClick={() => void pin(provider.id, widget.id).catch(onError)}>{pinned ? "★" : "☆"}</button> : <span className="star-gap" aria-hidden="true" />}
               </div>
             );
           })}
@@ -551,18 +672,6 @@ export default function App() {
     };
   }, [load]);
 
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") void invoke("hide_flyout").catch(reportError);
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r") {
-        event.preventDefault();
-        void refreshAll();
-      }
-    };
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  });
-
   const patch = async (value: Partial<Settings>) => {
     try {
       setSettings(await invoke<Settings>("patch_settings", { patch: value }));
@@ -571,7 +680,7 @@ export default function App() {
       reportError(patchError);
     }
   };
-  const refreshAll = async () => {
+  const refreshAll = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     try {
@@ -582,7 +691,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [busy, reportError]);
   const refreshProvider = async (id: string) => {
     if (busy) return;
     setBusy(true);
@@ -608,7 +717,30 @@ export default function App() {
     }
   };
 
-  const theme = settings?.theme ?? "system";
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const editing = (event.target as HTMLElement | null)?.closest?.("input, textarea, select");
+      if (event.key === "Escape") {
+        // Leave a half-typed shortcut or API key recoverable: the first Escape drops focus, a
+        // second one — with nothing focused — closes the flyout.
+        if (editing instanceof HTMLElement) editing.blur();
+        else void invoke("hide_flyout").catch(reportError);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        void refreshAll();
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [refreshAll, reportError]);
+
+  const scrollRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [screen]);
+
+  const theme = useResolvedTheme(settings?.theme ?? "system");
   const density = settings?.density ?? "compact";
   return (
     <div className={`shell ${settings?.reduce_animations ? "reduce-motion" : ""}`} data-theme={theme} data-density={density}>
@@ -618,7 +750,7 @@ export default function App() {
         <button className="icon-btn" disabled={busy} onClick={() => void refreshAll()}>{busy || dashboard?.refreshing ? "Refreshing…" : "Refresh"}</button>
       </header>
 
-      {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError(null)}>×</button></div>}
+      {error && <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError(null)}>×</button></div>}
 
       {screen === "dash" && dashboard && dashboard.pins.length > 0 && (
         <div className="pins">
@@ -632,18 +764,29 @@ export default function App() {
         </div>
       )}
 
-      <main className="scroll">
+      <main className="scroll" ref={scrollRef}>
         {screen === "dash" && !dashboard && <div className="empty">Loading…</div>}
-        {screen === "dash" && dashboard?.providers.length === 0 && <div className="empty">No providers are enabled. Open Customize to turn one on.</div>}
-        {screen === "dash" && dashboard?.total_spend && settings && <TotalSpendCard total={dashboard.total_spend} settings={settings} onPatch={patch} />}
-        {screen === "dash" && settings && dashboard?.providers.map((provider) => <ProviderCard key={provider.info.id} provider={provider} settings={settings} busy={busy || dashboard.refreshing} onPatch={patch} onRefresh={() => refreshProvider(provider.info.id)} onError={reportError} />)}
+        {screen === "dash" && dashboard?.providers.length === 0 ? (
+          <div className="empty"><p>No providers are enabled.</p><button onClick={() => setScreen("customize")}>Open Customize</button></div>
+        ) : (
+          screen === "dash" &&
+          settings &&
+          dashboard && (
+            <>
+              {dashboard.total_spend && <TotalSpendCard total={dashboard.total_spend} settings={settings} onPatch={patch} />}
+              {dashboard.providers.map((provider) => (
+                <ProviderCard key={provider.info.id} provider={provider} settings={settings} busy={busy || dashboard.refreshing} onPatch={patch} onRefresh={() => refreshProvider(provider.info.id)} onError={reportError} />
+              ))}
+            </>
+          )
+        )}
         {screen === "settings" && settings && <SettingsScreen settings={settings} onPatch={patch} onApiKey={setApiKey} onReset={resetAll} onError={reportError} />}
         {screen === "customize" && <Customize onChanged={load} onError={reportError} />}
       </main>
 
       <footer className="footer">
         <span>{dashboard ? `v${dashboard.version}` : ""}</span>
-        <button className="countdown grow" onClick={() => void refreshAll()}>{dashboard ? `Next update in ${Math.ceil(dashboard.next_refresh_in_secs / 60)}m` : ""}</button>
+        <button className="countdown grow" onClick={() => void refreshAll()}>{dashboard ? nextUpdateLabel(dashboard.next_refresh_in_secs, busy || dashboard.refreshing) : ""}</button>
         <button className={screen === "customize" ? "active" : ""} onClick={() => setScreen("customize")}>Customize</button>
         <button className={screen === "settings" ? "active" : ""} onClick={() => setScreen("settings")}>Settings</button>
         <button onClick={() => void invoke("hide_flyout").catch(reportError)}>Close</button>

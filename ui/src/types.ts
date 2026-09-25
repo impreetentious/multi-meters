@@ -142,6 +142,7 @@ export type Settings = {
 export type CustomizeProvider = {
   id: string;
   displayName: string;
+  icon: string;
   enabled: boolean;
   widgets: WidgetDescriptor[];
 };

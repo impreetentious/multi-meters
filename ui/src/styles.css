@@ -24,6 +24,12 @@ button:disabled { cursor: default; opacity: 0.45; }
   --accent: #60a5fa;
   --danger: #f87171;
   --warning: #f59e0b;
+  --danger-text: #fecaca;
+  --danger-bg: #7f1d1d99;
+  --danger-border: #ef444466;
+  --warning-text: #fde68a;
+  --warning-bg: #78350f70;
+  --warning-border: #f59e0b4d;
   height: 100%;
   color: var(--text);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
@@ -48,24 +54,13 @@ button:disabled { cursor: default; opacity: 0.45; }
   --accent: #2563eb;
   --danger: #b91c1c;
   --warning: #b45309;
+  --danger-text: #7f1d1d;
+  --danger-bg: #fee2e2;
+  --danger-border: #fca5a5;
+  --warning-text: #713f12;
+  --warning-bg: #fef3c7;
+  --warning-border: #fcd34d;
   box-shadow: 0 18px 55px #0003;
-}
-
-@media (prefers-color-scheme: light) {
-  .shell[data-theme="system"] {
-    color-scheme: light;
-    --bg: #f4f4f4;
-    --surface: #fff;
-    --surface-hover: #ececec;
-    --field: #f0f0f0;
-    --text: #181818;
-    --muted: #656565;
-    --border: #0000001d;
-    --accent: #2563eb;
-    --danger: #b91c1c;
-    --warning: #b45309;
-    box-shadow: 0 18px 55px #0003;
-  }
 }
 
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
@@ -111,14 +106,14 @@ button:hover:not(:disabled) { background: var(--surface-hover); }
   align-items: flex-start;
   gap: 8px;
   padding: 8px 12px;
-  color: #fecaca;
-  background: #7f1d1d99;
-  border-bottom: 1px solid #ef444466;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-bottom: 1px solid var(--danger-border);
   overflow-wrap: anywhere;
 }
 .error-banner span { flex: 1; }
 .error-banner button { padding: 0 5px; background: transparent; border: 0; font-size: 18px; }
-.warning-box { margin: -2px 0 8px; padding: 7px 8px; color: #fde68a; background: #78350f70; border: 1px solid #f59e0b4d; border-radius: 7px; font-size: 12px; }
+.warning-box { margin: -2px 0 8px; padding: 7px 8px; color: var(--warning-text); background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 7px; font-size: 12px; }
 
 .pins {
   display: flex;
@@ -141,7 +136,6 @@ button:hover:not(:disabled) { background: var(--surface-hover); }
 .card-h .name { font-weight: 700; }
 .plan { max-width: 120px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .stale { padding: 1px 5px; color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, transparent); border-radius: 5px; font-size: 10px; }
-.warning-mark { display: grid; width: 17px; height: 17px; place-items: center; color: #181818; background: var(--warning); border-radius: 50%; font-size: 11px; font-weight: 800; }
 
 .row { margin: 9px 0; }
 .row-h { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
@@ -195,8 +189,21 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .metric-row { padding-left: 4px; color: var(--muted); font-size: 12px; }
 .metric-row select { max-width: 96px; padding: 3px 5px; font-size: 11px; }
 .star { min-width: 26px; padding: 2px 4px; color: #fbbf24; background: transparent; border: 0; font-size: 16px; }
+/* A metric that cannot be pinned still reserves the star's width, so every row's controls line up. */
+.star-gap { flex: 0 0 auto; width: 26px; }
+
+.modal-scrim { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: #0000008c; backdrop-filter: blur(2px); }
+.modal { width: 100%; max-width: 300px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 16px 44px #0007; }
+.modal h4 { margin: 0 0 6px; font-size: 13px; }
+.modal p { margin: 0 0 13px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.danger-fill { color: #fff; background: #b91c1c; border-color: #b91c1c; }
+.danger-fill:hover:not(:disabled) { background: #991b1b !important; }
+
+.icon-fallback { display: inline-block; width: 18px; height: 18px; background: var(--field); border: 1px solid var(--border); border-radius: 5px; }
 
 .empty { padding: 36px 15px; color: var(--muted); text-align: center; }
+.empty p { margin: 0 0 11px; }
 .empty.compact { padding: 18px 8px; }
 .muted { color: var(--muted); }
 
