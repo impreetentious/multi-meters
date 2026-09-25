@@ -48,38 +48,34 @@ pub fn proxy_config_path() -> PathBuf {
     home().join(".multimeters").join("config.json")
 }
 
-/// Cursor's VS Code-style state DB.
+/// Cursor's VS Code-style state DB, under `%APPDATA%` on Windows. Electron keeps `userData` in
+/// the platform config directory, which `config_dir` resolves on every OS the core crate builds
+/// for, so no per-OS branch is needed here.
 pub fn cursor_state_db() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        dirs::data_dir()
-            .or_else(data_local_dir)
-            .unwrap_or_else(home)
-            .join("Cursor")
-            .join("User")
-            .join("globalStorage")
-            .join("state.vscdb")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        home().join("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
-    }
+    vscode_state_db("Cursor")
 }
 
+/// Some Windows installs keep the Cursor profile under `%LOCALAPPDATA%` instead.
 pub fn cursor_state_db_alternate() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        data_local_dir().map(|p| {
-            p.join("Cursor")
-                .join("User")
-                .join("globalStorage")
-                .join("state.vscdb")
-        })
+        data_local_dir().map(|root| vscode_state_db_in(&root, "Cursor"))
     }
     #[cfg(not(target_os = "windows"))]
     {
         None
     }
+}
+
+fn vscode_state_db(app: &str) -> PathBuf {
+    vscode_state_db_in(&config_dir().unwrap_or_else(|| home().join(".config")), app)
+}
+
+fn vscode_state_db_in(root: &Path, app: &str) -> PathBuf {
+    root.join(app)
+        .join("User")
+        .join("globalStorage")
+        .join("state.vscdb")
 }
 
 pub fn claude_home() -> PathBuf {
@@ -143,16 +139,7 @@ pub fn devin_credentials() -> PathBuf {
 }
 
 pub fn devin_state_db() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        dirs::data_dir()
-            .unwrap_or_else(home)
-            .join("Devin/User/globalStorage/state.vscdb")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        home().join("Library/Application Support/Devin/User/globalStorage/state.vscdb")
-    }
+    vscode_state_db("Devin")
 }
 
 pub fn pi_sessions() -> PathBuf {

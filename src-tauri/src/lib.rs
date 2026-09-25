@@ -12,6 +12,9 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_positioner::{Position, WindowExt};
 
+/// Upper bound on how long the background loop sleeps between due-time checks.
+const REFRESH_TICK_SECS: u64 = 20;
+
 struct State {
     engine: Arc<AppEngine>,
     notified: Arc<Mutex<HashSet<String>>>,
@@ -432,9 +435,20 @@ pub fn run() {
             let loop_notified = Arc::clone(&notified);
             tauri::async_runtime::spawn(async move {
                 loop {
-                    let interval = loop_engine.settings().await.refresh_interval_secs();
-                    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-                    loop_engine.refresh_all(false).await;
+                    // Wake at least every REFRESH_TICK_SECS so a shortened refresh interval takes
+                    // effect promptly instead of waiting out the interval that was in force when
+                    // this iteration began.
+                    let due_in = loop_engine.secs_until_refresh().await.max(0) as u64;
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        due_in.clamp(1, REFRESH_TICK_SECS),
+                    ))
+                    .await;
+                    if !loop_engine.refresh_all(false).await {
+                        // Nothing was due after all — a manual refresh or a still-fresh cache got
+                        // there first. Wait out a tick rather than re-asking straight away.
+                        tokio::time::sleep(std::time::Duration::from_secs(REFRESH_TICK_SECS)).await;
+                        continue;
+                    }
                     deliver_notifications(&loop_app, &loop_engine, &loop_notified).await;
                     warn_result(
                         loop_app.emit("dashboard-updated", ()),

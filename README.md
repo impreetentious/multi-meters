@@ -1,6 +1,6 @@
-# Multimeters
+# MultiMeters
 
-Multimeters is a native Windows tray app that puts AI coding subscription usage in one compact dashboard.
+MultiMeters is a native Windows tray app that puts AI coding subscription usage in one compact dashboard.
 
 It supports Claude, Codex, Cursor, GitHub Copilot, Devin, Grok, OpenCode, OpenRouter, Z.ai and Antigravity.
 
@@ -15,9 +15,9 @@ It supports Claude, Codex, Cursor, GitHub Copilot, Devin, Grok, OpenCode, OpenRo
 
 ## Install
 
-Download an MSI or NSIS installer from the latest GitHub release and launch Multimeters from the Windows tray.
+Download an MSI or NSIS installer from the latest GitHub release and launch MultiMeters from the Windows tray.
 
-Multimeters discovers supported local app and CLI credentials automatically. OpenRouter and Z.ai keys can be added in Settings. Credentials never appear in the dashboard API.
+MultiMeters discovers supported local app and CLI credentials automatically. OpenRouter and Z.ai keys can be added in Settings. Credentials never appear in the dashboard API.
 
 ## Use
 
@@ -26,20 +26,20 @@ Left-click the tray icon to toggle the dashboard. Right-click it for Open, Setti
 The local API listens on `http://127.0.0.1:6736` and exposes normalized usage at `/v1/limits`. The companion CLI prints the same data:
 
 ```text
-Multimeters [provider] [--force]
+MultiMeters [provider] [--force]
 ```
 
 ## Privacy
 
-Multimeters runs locally. It reads supported credentials and usage data only to contact provider usage endpoints or calculate local totals; it does not proxy prompts or responses. Settings, cache data and logs remain under `%LOCALAPPDATA%\Multimeters`.
+MultiMeters runs locally. It reads supported credentials and usage data only to contact provider usage endpoints or calculate local totals; it does not proxy prompts or responses. Settings, cache data and logs remain under `%LOCALAPPDATA%\MultiMeters`.
 
 The loopback API is unauthenticated: it binds `127.0.0.1`, so any program running under your account can read it. Browser requests are answered only for loopback origins, which stops pages you visit from reading it.
 
 ## Limitations
 
 - Windows only. Installers and the tray shell target Windows; the core library and CLI also build on macOS and Linux.
-- Live meters need each provider's own app or CLI signed in on the same machine. Multimeters has no account of its own and cannot add one.
-- Provider usage endpoints are private and undocumented, so a provider-side change can stall a meter until Multimeters catches up.
+- Live meters need each provider's own app or CLI signed in on the same machine. MultiMeters has no account of its own and cannot add one.
+- Provider usage endpoints are private and undocumented, so a provider-side change can stall a meter until MultiMeters catches up.
 - Cost and token totals for Claude, Codex, Cursor and Grok are estimated from local logs priced against a bundled catalog snapshot; OpenCode reports measured cost. Models missing from the snapshot are excluded from totals and named in the UI.
 
 ## Develop
@@ -67,4 +67,4 @@ Apache-2.0 © 2024-2026 Sidakpreet Singh — see [LICENSE](LICENSE).
 
 ---
 
-**Version:** v0.2.2
+**Version:** v0.2.3

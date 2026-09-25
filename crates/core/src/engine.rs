@@ -239,15 +239,22 @@ impl AppEngine {
         Ok(settings)
     }
 
-    pub async fn refresh_all(&self, force: bool) {
+    /// Seconds until the background loop should fetch again. Zero once a refresh is due.
+    pub async fn secs_until_refresh(&self) -> i64 {
+        secs_until_refresh(&*self.inner.read().await)
+    }
+
+    /// Refresh every enabled provider. Returns whether snapshots were actually fetched, so a
+    /// caller can skip the work that only matters when the data changed.
+    pub async fn refresh_all(&self, force: bool) -> bool {
         let _refresh_guard = self.refresh_guard.lock().await;
         let enabled = {
             let mut inner = self.inner.write().await;
             if inner.refreshing {
-                return;
+                return false;
             }
             if !force && refresh_is_fresh(&inner) {
-                return;
+                return false;
             }
             inner.refreshing = true;
             inner.settings.enabled.clone()
@@ -287,6 +294,7 @@ impl AppEngine {
         if let Err(error) = save_cache(&snapshots) {
             tracing::error!(%error, "could not save usage cache");
         }
+        true
     }
 
     pub async fn refresh_one(&self, id: &str, force: bool) -> Result<(), String> {
@@ -444,16 +452,11 @@ impl AppEngine {
             None
         };
 
-        let interval = inner.settings.refresh_interval_secs() as i64;
-        let elapsed = inner
-            .last_attempt
-            .map(|attempt| attempt.elapsed().as_secs() as i64)
-            .unwrap_or(interval);
         Dashboard {
             providers: dashboard_providers,
             pins,
             total_spend,
-            next_refresh_in_secs: (interval - elapsed).max(0),
+            next_refresh_in_secs: secs_until_refresh(&inner),
             refreshing: inner.refreshing,
             version: env!("CARGO_PKG_VERSION").into(),
         }
@@ -600,6 +603,28 @@ impl AppEngine {
         Some(json!(snapshots))
     }
 
+    /// Build an engine over fixed providers, settings and snapshots. Test-only: it reads and
+    /// writes nothing under the user's real configuration directory.
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        providers: Vec<Arc<dyn Provider>>,
+        settings: AppSettings,
+        snapshots: HashMap<String, ProviderSnapshot>,
+    ) -> Self {
+        Self {
+            http: Http::with_proxy(None).expect("test HTTP client"),
+            providers,
+            inner: RwLock::new(Inner {
+                settings,
+                snapshots,
+                errors: HashMap::new(),
+                last_attempt: None,
+                refreshing: false,
+            }),
+            refresh_guard: Mutex::new(()),
+        }
+    }
+
     pub fn provider_ids(&self) -> Vec<String> {
         self.providers
             .iter()
@@ -641,6 +666,15 @@ fn snapshot_is_fresh(snapshot: &ProviderSnapshot) -> bool {
             .signed_duration_since(snapshot.refreshed_at)
             .num_seconds()
             < CACHE_TTL_SECS
+}
+
+fn secs_until_refresh(inner: &Inner) -> i64 {
+    let interval = inner.settings.refresh_interval_secs() as i64;
+    let elapsed = inner
+        .last_attempt
+        .map(|attempt| attempt.elapsed().as_secs() as i64)
+        .unwrap_or(interval);
+    (interval - elapsed).max(0)
 }
 
 fn refresh_is_fresh(inner: &Inner) -> bool {
@@ -990,6 +1024,27 @@ mod tests {
         assert_eq!(
             notification_kind(95.0, 100.0, Some(reset), Some(SESSION_MS), &settings),
             Some("will_run_out")
+        );
+    }
+
+    #[test]
+    fn shortening_the_refresh_interval_brings_the_next_run_forward() {
+        let mut inner = Inner {
+            settings: AppSettings {
+                refresh_interval_minutes: 60,
+                ..AppSettings::default()
+            },
+            snapshots: HashMap::new(),
+            errors: HashMap::new(),
+            last_attempt: Some(Instant::now()),
+            refreshing: false,
+        };
+        assert!(secs_until_refresh(&inner) > 3_000);
+        inner.settings.refresh_interval_minutes = 1;
+        let due_in = secs_until_refresh(&inner);
+        assert!(
+            (0..=60).contains(&due_in),
+            "a shortened interval must shorten the wait, got {due_in}"
         );
     }
 }

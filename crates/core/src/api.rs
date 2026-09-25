@@ -2,13 +2,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::header::HeaderValue;
+use axum::http::header::{HeaderValue, CACHE_CONTROL};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::engine::AppEngine;
 
@@ -56,6 +57,12 @@ pub fn router(engine: Arc<AppEngine>) -> Router {
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(engine)
         .layer(cors)
+        // Plan and spend readings go stale within minutes and are personal. Nothing on the way
+        // to a caller should keep a copy.
+        .layer(SetResponseHeaderLayer::overriding(
+            CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
 }
 
 pub async fn start(engine: Arc<AppEngine>) {
@@ -122,6 +129,55 @@ fn api_error(status: StatusCode, code: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::AppSettings;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    /// An engine over no providers, so the tests never read the developer's own settings,
+    /// credential store or usage cache.
+    fn test_engine() -> Arc<AppEngine> {
+        Arc::new(AppEngine::for_test(
+            vec![],
+            AppSettings::default(),
+            Default::default(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn responses_are_never_cached() {
+        let response = router(test_engine())
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/limits")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CACHE_CONTROL)
+                .map(HeaderValue::as_ref),
+            Some(b"no-store".as_ref())
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_routes_and_providers_answer_with_a_json_error() {
+        for (uri, status) in [
+            ("/v1/limits/not-a-provider", StatusCode::NOT_FOUND),
+            ("/nope", StatusCode::NOT_FOUND),
+        ] {
+            let response = router(test_engine())
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .expect("response");
+            assert_eq!(response.status(), status, "{uri}");
+        }
+    }
 
     #[test]
     fn only_loopback_origins_may_read_the_local_api() {
