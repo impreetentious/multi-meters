@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::{fs::OpenOptions, io::Write, sync::Mutex};
 
-use multimeters_core::{api, paths, AppEngine, AppSettings, Dashboard};
+use multimeters_core::{api, paths, AlertLog, AppEngine, AppSettings, Dashboard};
 use serde_json::json;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -17,7 +16,7 @@ const REFRESH_TICK_SECS: u64 = 20;
 
 struct State {
     engine: Arc<AppEngine>,
-    notified: Arc<Mutex<HashSet<String>>>,
+    notified: Arc<Mutex<AlertLog>>,
 }
 
 #[tauri::command]
@@ -290,19 +289,10 @@ fn set_global_shortcut(
     Ok(())
 }
 
-async fn deliver_notifications(
-    app: &AppHandle,
-    engine: &AppEngine,
-    notified: &Mutex<HashSet<String>>,
-) {
+async fn deliver_notifications(app: &AppHandle, engine: &AppEngine, notified: &Mutex<AlertLog>) {
     for notification in engine.notification_candidates().await {
         let should_deliver = match notified.lock() {
-            Ok(mut delivered) => {
-                if delivered.len() > 1_000 {
-                    delivered.clear();
-                }
-                delivered.insert(notification.id)
-            }
+            Ok(mut delivered) => delivered.should_deliver(&notification),
             Err(error) => {
                 tracing::error!(%error, "notification deduplication state is unavailable");
                 false
@@ -413,7 +403,7 @@ pub fn run() {
 
             let seed_engine = Arc::clone(&engine);
             let seed_app = app.handle().clone();
-            let notified = Arc::new(Mutex::new(HashSet::new()));
+            let notified = Arc::new(Mutex::new(AlertLog::default()));
             let seed_notified = Arc::clone(&notified);
             tauri::async_runtime::spawn(async move {
                 seed_engine.seed_if_needed().await;

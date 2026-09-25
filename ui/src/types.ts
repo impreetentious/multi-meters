@@ -45,12 +45,22 @@ export type WidgetDescriptor = {
   default_pinned: boolean;
 };
 
+// Computed by the engine on every dashboard read. The interface renders this verdict rather
+// than recomputing the thresholds, so there is exactly one implementation of pacing.
+export type Pace = {
+  status: "on_track" | "close" | "run_out" | "empty";
+  color: string;
+  projected: number;
+  elapsed_fraction?: number;
+};
+
 export type RenderedWidget = {
   id: string;
   title: string;
   line: MetricLine | null;
   pinned: boolean;
   no_data: boolean;
+  pace?: Pace;
 };
 
 export type DashboardProvider = {
@@ -88,6 +98,7 @@ export type Dashboard = {
     title: string;
     text: string;
     used_ratio?: number;
+    color?: string;
   }[];
   total_spend: {
     period: "today" | "yesterday" | "last30";

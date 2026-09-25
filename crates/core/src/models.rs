@@ -300,6 +300,50 @@ pub struct DashboardProvider {
     pub on_demand: Vec<RenderedWidget>,
 }
 
+/// How a meter is tracking against its reset. Named states rather than colours, so callers
+/// branch on meaning and the palette stays in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaceStatus {
+    /// Projected to finish the window with room to spare.
+    OnTrack,
+    /// Projected to finish the window with very little left.
+    Close,
+    /// Projected to run out before the window resets.
+    RunOut,
+    /// Already spent, or as good as.
+    Empty,
+}
+
+impl PaceStatus {
+    pub fn color(self) -> &'static str {
+        match self {
+            Self::OnTrack => "#3B82F6",
+            Self::Close => "#F59E0B",
+            Self::RunOut | Self::Empty => "#EF4444",
+        }
+    }
+
+    /// Whether the projection is worth showing unprompted.
+    pub fn is_warning(self) -> bool {
+        matches!(self, Self::Close | Self::RunOut)
+    }
+}
+
+/// A meter's pace verdict, recomputed whenever the dashboard is assembled so the projection
+/// tracks the clock. This is the only implementation — the interface renders what it is given
+/// rather than recomputing the same thresholds in another language.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pace {
+    pub status: PaceStatus,
+    pub color: String,
+    /// Usage projected to the end of the window, as a fraction of the limit.
+    pub projected: f64,
+    /// How far through the window the clock is, 0..1. Absent when the window is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed_fraction: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderedWidget {
     pub id: String,
@@ -307,6 +351,9 @@ pub struct RenderedWidget {
     pub line: Option<MetricLine>,
     pub pinned: bool,
     pub no_data: bool,
+    /// Present only for progress meters that can be paced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pace: Option<Pace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +363,10 @@ pub struct Pin {
     pub title: String,
     pub text: String,
     pub used_ratio: Option<f64>,
+    /// Pace colour for the pin's mini track. Pins are the glanceable surface, so they have to
+    /// carry the same urgency signal the full meter shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,9 +400,37 @@ pub struct Dashboard {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageNotification {
+    /// Identifies the alert itself — provider, metric and severity — independent of when it
+    /// fires.
     pub id: String,
+    /// The reset window the reading belongs to. One notification per alert per window.
+    pub window: String,
     pub title: String,
     pub body: String,
+}
+
+/// Remembers which alerts have already been shown. Keyed by alert rather than by
+/// alert-and-window, so it stays the size of the alert catalogue instead of growing by one
+/// entry every time a quota window rolls over.
+#[derive(Debug, Default)]
+pub struct AlertLog(std::collections::HashMap<String, String>);
+
+impl AlertLog {
+    /// Records the notification and reports whether it is new for its window.
+    pub fn should_deliver(&mut self, notification: &UsageNotification) -> bool {
+        self.0
+            .insert(notification.id.clone(), notification.window.clone())
+            .as_deref()
+            != Some(notification.window.as_str())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 pub fn provider_color(id: &str) -> &'static str {

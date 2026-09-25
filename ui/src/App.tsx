@@ -78,25 +78,6 @@ function resetLabel(iso: string | undefined, countdown: boolean, timeFormat: Set
   })}`;
 }
 
-function pace(line: Extract<MetricLine, { type: "progress" }>) {
-  const ratio = line.limit > 0 ? line.used / line.limit : 0;
-  const remaining = Math.max(0, 1 - ratio);
-  if (remaining <= 0.005) return { color: "#ef4444", projected: 1, status: "empty" as const };
-  if (line.resets_at && line.period_duration_ms) {
-    const leftMs = Math.max(0, new Date(line.resets_at).getTime() - Date.now());
-    const elapsedFraction = Math.max(0, line.period_duration_ms - leftMs) / line.period_duration_ms;
-    if (elapsedFraction > 0.08) {
-      const projected = ratio / elapsedFraction;
-      if (projected >= 1) return { color: "#ef4444", projected, status: "run_out" as const };
-      if (projected >= 0.9) return { color: "#f59e0b", projected, status: "close" as const };
-      return { color: "#3b82f6", projected, status: "on_track" as const };
-    }
-  }
-  if (remaining <= 0.1) return { color: "#ef4444", projected: ratio, status: "empty" as const };
-  if (ratio >= 0.8) return { color: "#f59e0b", projected: ratio, status: "close" as const };
-  return { color: "#3b82f6", projected: ratio, status: "on_track" as const };
-}
-
 function LineView({
   widget,
   settings,
@@ -119,15 +100,21 @@ function LineView({
   }
   if (line.type === "progress") {
     const ratio = Math.min(1, Math.max(0, line.limit > 0 ? line.used / line.limit : 0));
-    const verdict = pace(line);
-    const showPace = settings.always_show_pacing || verdict.status === "close" || verdict.status === "run_out";
-    const projectedLeft = Math.max(0, 1 - verdict.projected);
+    const verdict = widget.pace;
+    const showPace = !!verdict && (settings.always_show_pacing || verdict.status === "close" || verdict.status === "run_out");
+    const projectedLeft = Math.max(0, 1 - (verdict?.projected ?? 0));
     return (
       <div className="row">
         <div className="row-h">
           <span className="title">
             {widget.title}
-            {showPace && <small>~{Math.round(projectedLeft * 100)}% left at reset</small>}
+            {showPace && (
+              <small>
+                {verdict?.status === "run_out"
+                  ? "On track to run out early"
+                  : `~${Math.round(projectedLeft * 100)}% left at reset`}
+              </small>
+            )}
           </span>
           <button className="value-button" onClick={onToggleUsed}>
             {usedLeft(line, settings.show_usage_as === "used")}
@@ -143,24 +130,10 @@ function LineView({
         >
           <div
             className="fill"
-            style={{ width: `${ratio * 100}%`, background: line.color_hex ?? verdict.color }}
+            style={{ width: `${ratio * 100}%`, background: verdict?.color ?? line.color_hex }}
           />
-          {showPace && line.resets_at && line.period_duration_ms && (
-            <i
-              className="pace-mark"
-              style={{
-                left: `${Math.min(
-                  100,
-                  Math.max(
-                    0,
-                    ((line.period_duration_ms -
-                      Math.max(0, new Date(line.resets_at).getTime() - Date.now())) /
-                      line.period_duration_ms) *
-                      100,
-                  ),
-                )}%`,
-              }}
-            />
+          {showPace && verdict.elapsed_fraction != null && (
+            <i className="pace-mark" style={{ left: `${verdict.elapsed_fraction * 100}%` }} />
           )}
         </div>
         {line.resets_at && (
@@ -653,7 +626,7 @@ export default function App() {
             <div className="pin" key={`${pin.provider_id}:${pin.widget_id}`}>
               <div className="pin-title">{pin.title}</div>
               <div className="pin-value">{pin.text}</div>
-              {pin.used_ratio != null && <div className="pin-track"><i style={{ width: `${Math.min(100, Math.max(0, pin.used_ratio * 100))}%` }} /></div>}
+              {pin.used_ratio != null && <div className="pin-track"><i style={{ width: `${Math.min(100, Math.max(0, pin.used_ratio * 100))}%`, background: pin.color }} /></div>}
             </div>
           ))}
         </div>

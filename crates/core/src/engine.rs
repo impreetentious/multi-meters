@@ -6,7 +6,7 @@ use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
 
-use crate::format::{format_line, pace_color, used_ratio};
+use crate::format::{format_line, pace, used_ratio};
 use crate::http::Http;
 use crate::legacy;
 use crate::limits::{self, ProviderLimits};
@@ -371,6 +371,7 @@ impl AppEngine {
                     title: widget.title.clone(),
                     no_data,
                     pinned: inner.settings.is_pinned(&widget.id),
+                    pace: line.as_ref().and_then(widget_pace),
                     line,
                 };
                 if rendered.pinned {
@@ -382,6 +383,7 @@ impl AppEngine {
                                 title: format!("{} {}", info.display_name, widget.title),
                                 text: format_line(line, used_mode),
                                 used_ratio: used_ratio(line),
+                                color: rendered.pace.as_ref().map(|pace| pace.color.clone()),
                             });
                         }
                     }
@@ -481,6 +483,10 @@ impl AppEngine {
                 continue;
             }
             for widget in provider.widgets() {
+                // A metric the user removed from the dashboard should not still interrupt them.
+                if inner.settings.metric_hidden(&widget.id) {
+                    continue;
+                }
                 let Some(MetricLine::Progress {
                     used,
                     limit,
@@ -526,7 +532,8 @@ impl AppEngine {
                     ),
                 };
                 notifications.push(UsageNotification {
-                    id: format!("{}:{}:{kind}:{reset_key}", provider.info().id, widget.id),
+                    id: format!("{}:{}:{kind}", provider.info().id, widget.id),
+                    window: reset_key,
                     title,
                     body,
                 });
@@ -668,6 +675,27 @@ fn snapshot_is_fresh(snapshot: &ProviderSnapshot) -> bool {
             < CACHE_TTL_SECS
 }
 
+/// Pace a progress meter. A line that carries its own colour keeps it — a provider-supplied
+/// colour is a deliberate override, not something to project over.
+fn widget_pace(line: &MetricLine) -> Option<Pace> {
+    let MetricLine::Progress {
+        used,
+        limit,
+        resets_at,
+        period_duration_ms,
+        color_hex,
+        ..
+    } = line
+    else {
+        return None;
+    };
+    let mut verdict = pace(*used, *limit, *resets_at, *period_duration_ms);
+    if let Some(color) = color_hex {
+        verdict.color = color.clone();
+    }
+    Some(verdict)
+}
+
 fn secs_until_refresh(inner: &Inner) -> i64 {
     let interval = inner.settings.refresh_interval_secs() as i64;
     let elapsed = inner
@@ -718,12 +746,15 @@ fn notification_kind(
         return None;
     }
     let remaining = (1.0 - used / limit).clamp(0.0, 1.0);
-    let color = pace_color(used, limit, resets_at, period_duration_ms);
-    if settings.notify_will_run_out && color == "#EF4444" && resets_at.is_some() {
+    let status = pace(used, limit, resets_at, period_duration_ms).status;
+    if settings.notify_will_run_out
+        && matches!(status, PaceStatus::RunOut | PaceStatus::Empty)
+        && resets_at.is_some()
+    {
         Some("will_run_out")
     } else if settings.notify_almost_out && remaining <= 0.1 {
         Some("almost_out")
-    } else if settings.notify_cutting_it_close && color == "#F59E0B" {
+    } else if settings.notify_cutting_it_close && status == PaceStatus::Close {
         Some("cutting_close")
     } else {
         None
@@ -1025,6 +1056,163 @@ mod tests {
             notification_kind(95.0, 100.0, Some(reset), Some(SESSION_MS), &settings),
             Some("will_run_out")
         );
+    }
+
+    /// A provider whose snapshot is supplied up front, so engine assembly can be tested without
+    /// reaching a network or the user's machine.
+    struct StubProvider {
+        info: ProviderInfo,
+        widgets: Vec<WidgetDescriptor>,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for StubProvider {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+        fn widgets(&self) -> &[WidgetDescriptor] {
+            &self.widgets
+        }
+        async fn has_local_credentials(&self) -> bool {
+            false
+        }
+        async fn refresh(&self, _http: &Http) -> ProviderSnapshot {
+            ProviderSnapshot::ok(&self.info, None, vec![])
+        }
+    }
+
+    fn stub_info() -> ProviderInfo {
+        ProviderInfo {
+            id: "claude".into(),
+            display_name: "Claude".into(),
+            icon: "claude".into(),
+            links: vec![],
+        }
+    }
+
+    fn stub_widget(id: &str, title: &str) -> WidgetDescriptor {
+        WidgetDescriptor {
+            id: id.into(),
+            provider_id: "claude".into(),
+            title: title.into(),
+            metric_label: title.into(),
+            pinnable: true,
+            is_spend_tile: false,
+            default_on: true,
+            default_on_demand: false,
+            default_pinned: false,
+        }
+    }
+
+    fn stub_engine(settings: AppSettings) -> AppEngine {
+        let info = stub_info();
+        let snapshot = ProviderSnapshot::ok(
+            &info,
+            Some("Max".into()),
+            vec![
+                MetricLine::percent("Session", 96.0, None, SESSION_MS),
+                MetricLine::percent("Weekly", 20.0, None, WEEK_MS),
+            ],
+        );
+        AppEngine::for_test(
+            vec![Arc::new(StubProvider {
+                info,
+                widgets: vec![
+                    stub_widget("claude.session", "Session"),
+                    stub_widget("claude.weekly", "Weekly"),
+                ],
+            })],
+            settings,
+            HashMap::from([("claude".to_string(), snapshot)]),
+        )
+    }
+
+    fn stub_settings() -> AppSettings {
+        AppSettings {
+            enabled: BTreeSet::from(["claude".to_string()]),
+            order: vec!["claude".into()],
+            hidden_metrics: BTreeSet::new(),
+            on_demand: BTreeSet::new(),
+            pinned: std::collections::BTreeMap::new(),
+            notify_almost_out: true,
+            ..AppSettings::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_metrics_do_not_raise_notifications() {
+        let mut settings = stub_settings();
+        let engine = stub_engine(settings.clone());
+        let ids: Vec<_> = engine
+            .notification_candidates()
+            .await
+            .into_iter()
+            .map(|notification| notification.id)
+            .collect();
+        assert!(
+            ids.iter().any(|id| id.contains("claude.session")),
+            "a visible metric past the threshold should notify, got {ids:?}"
+        );
+
+        settings.hidden_metrics = BTreeSet::from(["claude.session".to_string()]);
+        assert!(
+            stub_engine(settings)
+                .notification_candidates()
+                .await
+                .is_empty(),
+            "a metric the user removed from the dashboard must not notify"
+        );
+    }
+
+    #[tokio::test]
+    async fn hidden_metrics_stay_off_the_dashboard() {
+        let mut settings = stub_settings();
+        settings.hidden_metrics = BTreeSet::from(["claude.weekly".to_string()]);
+        settings.on_demand = BTreeSet::from(["claude.session".to_string()]);
+        let dashboard = stub_engine(settings).dashboard().await;
+        let provider = &dashboard.providers[0];
+        assert!(provider.widgets.is_empty());
+        assert_eq!(provider.on_demand.len(), 1);
+        assert_eq!(provider.on_demand[0].id, "claude.session");
+        assert_eq!(
+            provider.snapshot.as_ref().unwrap().plan.as_deref(),
+            Some("Max")
+        );
+    }
+
+    #[tokio::test]
+    async fn pinned_widgets_surface_with_their_used_ratio() {
+        let mut settings = stub_settings();
+        settings.pinned = std::collections::BTreeMap::from([(
+            "claude".to_string(),
+            vec!["claude.weekly".to_string()],
+        )]);
+        let dashboard = stub_engine(settings).dashboard().await;
+        assert_eq!(dashboard.pins.len(), 1);
+        assert_eq!(dashboard.pins[0].title, "Claude Weekly");
+        assert_eq!(dashboard.pins[0].text, "80% left");
+        assert_eq!(dashboard.pins[0].used_ratio, Some(0.2));
+    }
+
+    #[test]
+    fn the_alert_log_repeats_across_windows_but_not_within_one() {
+        let alert = |window: &str| UsageNotification {
+            id: "claude:claude.session:almost_out".into(),
+            window: window.into(),
+            title: "Claude Is Almost Out".into(),
+            body: "Session has about 6% remaining.".into(),
+        };
+        let mut log = AlertLog::default();
+        assert!(log.should_deliver(&alert("1")));
+        assert!(
+            !log.should_deliver(&alert("1")),
+            "one alert per reset window"
+        );
+        assert!(
+            log.should_deliver(&alert("2")),
+            "the next window fires again"
+        );
+        assert_eq!(log.len(), 1, "rolling windows must not grow the log");
     }
 
     #[test]

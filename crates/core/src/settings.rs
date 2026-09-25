@@ -316,6 +316,23 @@ mod tests {
     }
 
     #[test]
+    fn settings_files_from_older_releases_take_the_current_defaults() {
+        // A file written before a field existed must adopt the field's intended default, not
+        // `bool::default()`. Container-level `#[serde(default)]` is what makes that true.
+        let older = r#"{"theme":"dark","refresh_interval_minutes":15}"#;
+        let settings: AppSettings = serde_json::from_str(older).expect("older settings parse");
+        assert_eq!(settings.theme, "dark", "saved values still win");
+        assert_eq!(settings.refresh_interval_minutes, 15);
+        assert!(settings.show_total_spend);
+        assert_eq!(settings.global_shortcut.as_deref(), Some("Ctrl+Shift+M"));
+        assert!(
+            !settings.enabled.is_empty(),
+            "providers fall back to the default set"
+        );
+        assert!(settings.validate_values().is_ok());
+    }
+
+    #[test]
     fn enforces_pin_limit_and_allows_unpinning() {
         let mut settings = AppSettings::default();
         settings.pinned.clear();
