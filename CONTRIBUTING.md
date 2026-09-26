@@ -21,7 +21,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 ```
 
-Windows shell and installer changes should also be exercised on Windows.
+Windows shell and installer changes should also be exercised on Windows. When only the front end
+changed, `npm --prefix ui run dev` serves the interface against a local fixture and needs no Rust
+toolchain.
+
+Provider icons live in `ui/public/icons` and are served from there; `resources/icons` holds only
+the 1024px app-icon master that `cargo tauri icon` generates the bundle icons from.
 
 ## Pull requests
 

@@ -21,11 +21,11 @@ MultiMeters discovers supported local app and CLI credentials automatically. Ope
 
 ## Use
 
-Left-click the tray icon to toggle the dashboard. Right-click it for Open, Settings and Quit. Hovering it shows your pinned meters without opening the flyout. Press `Esc` to hide the flyout and `Ctrl+R` to refresh.
+Left-click the tray icon to toggle the dashboard. Right-click it for Open, Settings and Quit. Hovering it shows your pinned meters without opening the flyout. Press `Esc` to hide the flyout — once to leave a text field, again to close — and `Ctrl+R` to refresh.
 
 The flyout closes as soon as it loses focus. Turn off **Close When Unfocused** in Settings to keep it open beside your editor.
 
-The local API listens on `http://127.0.0.1:6736` and exposes normalized usage at `/v1/limits`. The companion CLI prints the same data:
+The local API listens on `http://127.0.0.1:6736`. It exposes normalized usage at `/v1/limits` and the flyout's own line-by-line shape at `/v1/usage`; both accept a `/{provider}` suffix. The companion CLI prints the same data:
 
 ```text
 MultiMeters [provider] [--force]
@@ -57,6 +57,8 @@ cargo test --workspace --all-targets
 cargo tauri dev
 ```
 
+`npm --prefix ui run dev` serves the interface on its own at `http://localhost:1420`, backed by a local fixture instead of the Tauri IPC. It needs no Rust toolchain and runs on any OS, which makes it the fast loop for front-end work; the fixture is excluded from production bundles.
+
 Build Windows installers with `cargo tauri build`.
 
 ## Contributing
@@ -69,4 +71,4 @@ Apache-2.0 © 2024-2026 Sidakpreet Singh — see [LICENSE](LICENSE).
 
 ---
 
-**Version:** v0.2.6
+**Version:** v0.2.7

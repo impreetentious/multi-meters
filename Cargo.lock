@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "multimeters"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "multimeters-core",
@@ -2403,7 +2403,7 @@ dependencies = [
 
 [[package]]
 name = "multimeters-cli"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "multimeters-core",
@@ -2414,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "multimeters-core"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "async-trait",
