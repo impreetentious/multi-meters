@@ -27,23 +27,8 @@ impl GrokProvider {
             }],
         };
         let mut widgets = vec![
-            widget_labeled(
-                "grok.weekly",
-                "grok",
-                "Weekly",
-                "Weekly limit",
-                true,
-                false,
-                false,
-            ),
-            widget(
-                "grok.payAsYouGo",
-                "grok",
-                "Pay as you go",
-                true,
-                true,
-                false,
-            ),
+            widget_labeled("grok.weekly", "grok", "Weekly", "Weekly limit", true),
+            widget("grok.payAsYouGo", "grok", "Pay as you go", true),
         ];
         widgets.extend(spend_widgets("grok"));
         Self { info, widgets }

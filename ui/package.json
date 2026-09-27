@@ -1,7 +1,7 @@
 {
   "name": "multimeters-ui",
   "private": true,
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "scripts": {
     "check:version": "node ../scripts/check-version-coherence.mjs",

@@ -41,8 +41,6 @@ export type WidgetDescriptor = {
   pinnable: boolean;
   is_spend_tile: boolean;
   default_on: boolean;
-  default_on_demand: boolean;
-  default_pinned: boolean;
 };
 
 // Computed by the engine on every dashboard read. The interface renders this verdict rather

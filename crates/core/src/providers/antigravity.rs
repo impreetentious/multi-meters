@@ -26,37 +26,14 @@ impl AntigravityProvider {
                 links: vec![],
             },
             widgets: vec![
-                widget(
-                    "antigravity.geminiPro",
-                    "antigravity",
-                    "Session",
-                    true,
-                    false,
-                    true,
-                ),
-                widget(
-                    "antigravity.geminiWeekly",
-                    "antigravity",
-                    "Weekly",
-                    true,
-                    false,
-                    true,
-                ),
-                widget(
-                    "antigravity.claude",
-                    "antigravity",
-                    "Claude",
-                    true,
-                    true,
-                    false,
-                ),
+                widget("antigravity.geminiPro", "antigravity", "Session", true),
+                widget("antigravity.geminiWeekly", "antigravity", "Weekly", true),
+                widget("antigravity.claude", "antigravity", "Claude", true),
                 widget(
                     "antigravity.claudeWeekly",
                     "antigravity",
                     "Claude Weekly",
                     true,
-                    true,
-                    false,
                 ),
             ],
         }
@@ -603,7 +580,9 @@ fn map_summary(body: &Value) -> Option<Vec<MetricLine>> {
             for bucket in arr {
                 if let Some(id) = str_at(bucket, "bucketId") {
                     if !matches!(id, "gemini-5h" | "gemini-weekly" | "3p-5h" | "3p-weekly") {
-                        tracing::warn!(bucket_id = %id, "ignoring an unknown Antigravity quota bucket");
+                        // Antigravity ships buckets this app does not meter (image quotas, for one).
+                        // Routine, so it must not compete with real warnings in the log.
+                        tracing::debug!(bucket_id = %id, "ignoring an unmapped Antigravity quota bucket");
                         continue;
                     }
                     if !buckets.contains_key(id) {

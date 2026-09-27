@@ -33,26 +33,12 @@ impl CodexProvider {
             ],
         };
         let mut widgets = vec![
-            widget("codex.session", "codex", "Session", true, false, true),
-            widget("codex.weekly", "codex", "Weekly", true, false, true),
-            widget("codex.spark", "codex", "Spark", true, true, false),
-            widget(
-                "codex.sparkWeekly",
-                "codex",
-                "Spark Weekly",
-                true,
-                true,
-                false,
-            ),
-            widget(
-                "codex.rateLimitResets",
-                "codex",
-                "Rate Limit Resets",
-                true,
-                true,
-                false,
-            ),
-            widget("codex.credits", "codex", "Credits", true, true, false),
+            widget("codex.session", "codex", "Session", true),
+            widget("codex.weekly", "codex", "Weekly", true),
+            widget("codex.spark", "codex", "Spark", true),
+            widget("codex.sparkWeekly", "codex", "Spark Weekly", true),
+            widget("codex.rateLimitResets", "codex", "Rate Limit Resets", true),
+            widget("codex.credits", "codex", "Credits", true),
         ];
         widgets.extend(spend_widgets("codex"));
         Self { info, widgets }

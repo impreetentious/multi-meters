@@ -1117,8 +1117,6 @@ mod tests {
             pinnable: true,
             is_spend_tile: false,
             default_on: true,
-            default_on_demand: false,
-            default_pinned: false,
         }
     }
 

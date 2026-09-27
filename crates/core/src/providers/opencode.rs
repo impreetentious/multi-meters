@@ -25,23 +25,9 @@ impl OpenCodeProvider {
             }],
         };
         let mut widgets = vec![
-            widget(
-                "opencode.session",
-                "opencode",
-                "Session",
-                true,
-                false,
-                false,
-            ),
-            widget("opencode.weekly", "opencode", "Weekly", true, false, false),
-            widget(
-                "opencode.monthly",
-                "opencode",
-                "Monthly",
-                true,
-                false,
-                false,
-            ),
+            widget("opencode.session", "opencode", "Session", true),
+            widget("opencode.weekly", "opencode", "Weekly", true),
+            widget("opencode.monthly", "opencode", "Monthly", true),
         ];
         widgets.extend(spend_widgets("opencode"));
         Self { info, widgets }

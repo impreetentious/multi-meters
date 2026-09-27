@@ -218,9 +218,10 @@ pub struct WidgetDescriptor {
     pub metric_label: String,
     pub pinnable: bool,
     pub is_spend_tile: bool,
+    /// Whether the metric starts visible. This is the only default a descriptor carries:
+    /// placement and pins are seeded from `AppSettings::default`, and a second copy of them
+    /// here could only drift away from it.
     pub default_on: bool,
-    pub default_on_demand: bool,
-    pub default_pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

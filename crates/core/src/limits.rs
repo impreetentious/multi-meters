@@ -193,23 +193,20 @@ fn append_resource(resources: &mut Map<String, Value>, widget_id: &str, line: &M
     }
 }
 
+/// The public name a widget's reading is published under. Only widgets whose key differs
+/// from their id's suffix need an arm; everything else falls through to that suffix.
 fn resource_key(widget_id: &str) -> &str {
     match widget_id {
         "antigravity.geminiPro" => "geminiSession",
-        "antigravity.geminiWeekly" => "geminiWeekly",
         "antigravity.claude" => "nonGeminiSession",
         "antigravity.claudeWeekly" => "nonGeminiWeekly",
         "claude.extra" => "extraUsage",
-        "codex.sparkWeekly" => "sparkWeekly",
-        "codex.rateLimitResets" => "rateLimitResets",
         "copilot.premium" => "premiumCredits",
         "copilot.extra" => "extraUsage",
         "cursor.usage" => "totalUsage",
         "cursor.auto" => "autoUsage",
         "cursor.api" => "apiUsage",
-        "cursor.onDemand" => "onDemand",
         "devin.extra" => "extraUsageBalance",
-        "grok.payAsYouGo" => "payAsYouGo",
         _ => widget_id
             .split_once('.')
             .map_or(widget_id, |(_, suffix)| suffix),
@@ -237,8 +234,6 @@ mod tests {
             pinnable: true,
             is_spend_tile: false,
             default_on: true,
-            default_on_demand: false,
-            default_pinned: false,
         };
         let snapshot = ProviderSnapshot::ok(
             &info,
@@ -280,8 +275,6 @@ mod tests {
             pinnable: true,
             is_spend_tile: false,
             default_on: true,
-            default_on_demand: false,
-            default_pinned: false,
         };
         let mut snapshot = ProviderSnapshot::ok(
             &info,

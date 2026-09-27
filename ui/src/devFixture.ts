@@ -431,8 +431,6 @@ function customize(): CustomizeData {
           pinnable: !widget.id.endsWith(".trend"),
           is_spend_tile: /\.(today|yesterday|last30)$/.test(widget.id),
           default_on: true,
-          default_on_demand: settings.on_demand.includes(widget.id),
-          default_pinned: false,
         })),
       })),
     settings,

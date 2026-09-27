@@ -35,18 +35,16 @@ impl ClaudeProvider {
             ],
         };
         let mut widgets = vec![
-            widget("claude.session", "claude", "Session", true, false, true),
-            widget("claude.weekly", "claude", "Weekly", true, false, true),
-            widget("claude.sonnet", "claude", "Sonnet", false, true, false),
-            widget("claude.fable", "claude", "Fable", false, true, false),
+            widget("claude.session", "claude", "Session", true),
+            widget("claude.weekly", "claude", "Weekly", true),
+            widget("claude.sonnet", "claude", "Sonnet", false),
+            widget("claude.fable", "claude", "Fable", false),
             widget_labeled(
                 "claude.extra",
                 "claude",
                 "Extra Usage",
                 "Extra usage spent",
                 true,
-                false,
-                false,
             ),
         ];
         widgets.extend(spend_widgets("claude"));

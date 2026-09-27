@@ -32,43 +32,17 @@ impl CursorProvider {
             ],
         };
         let mut widgets = vec![
-            widget("cursor.credits", "cursor", "Credits", false, true, false),
-            widget_labeled(
-                "cursor.usage",
-                "cursor",
-                "Total Usage",
-                "Total usage",
-                true,
-                false,
-                false,
-            ),
-            widget("cursor.requests", "cursor", "Requests", false, true, false),
-            widget_labeled(
-                "cursor.auto",
-                "cursor",
-                "Auto Usage",
-                "Auto usage",
-                true,
-                false,
-                true,
-            ),
-            widget_labeled(
-                "cursor.api",
-                "cursor",
-                "API Usage",
-                "API usage",
-                true,
-                false,
-                true,
-            ),
+            widget("cursor.credits", "cursor", "Credits", false),
+            widget_labeled("cursor.usage", "cursor", "Total Usage", "Total usage", true),
+            widget("cursor.requests", "cursor", "Requests", false),
+            widget_labeled("cursor.auto", "cursor", "Auto Usage", "Auto usage", true),
+            widget_labeled("cursor.api", "cursor", "API Usage", "API usage", true),
             widget_labeled(
                 "cursor.onDemand",
                 "cursor",
                 "Extra Usage",
                 "On-demand",
                 true,
-                true,
-                false,
             ),
         ];
         widgets.extend(spend_widgets("cursor"));
@@ -463,9 +437,6 @@ fn billing_cycle(usage: &Value) -> (Option<chrono::DateTime<Utc>>, i64) {
 }
 
 fn merge_summary(lines: &mut Vec<MetricLine>, summary: &Value) {
-    if lines.iter().any(|l| l.label() == "Requests") {
-        return;
-    }
     if let Some(used) = num_at(summary, "includedRequestsUsed").or_else(|| {
         summary
             .pointer("/individualUsage/includedRequestsUsed")

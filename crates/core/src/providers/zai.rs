@@ -34,9 +34,9 @@ impl ZaiProvider {
                 ],
             },
             widgets: vec![
-                widget("zai.session", "zai", "Session", true, false, true),
-                widget("zai.weekly", "zai", "Weekly", true, false, true),
-                widget("zai.webSearches", "zai", "Web Searches", true, true, false),
+                widget("zai.session", "zai", "Session", true),
+                widget("zai.weekly", "zai", "Weekly", true),
+                widget("zai.webSearches", "zai", "Web Searches", true),
             ],
         }
     }
@@ -197,30 +197,24 @@ fn map_quota(root: &Value) -> Result<Vec<MetricLine>, String> {
         return Ok(vec![MetricLine::no_data()]);
     }
     let mut lines = Vec::new();
-    let mut saw_recognized = false;
     for entry in limits {
         let ty = str_at(entry, "type")
             .or_else(|| str_at(entry, "name"))
             .unwrap_or("");
         if ty == "TOKENS_LIMIT" {
             if let Some(line) = token_line(entry)? {
-                saw_recognized = true;
                 lines.push(line);
             }
         } else if ty == "TIME_LIMIT" && !saw_web_search(&lines) {
-            saw_recognized = true;
             lines.push(web_search_line(entry)?);
         }
     }
+    // A malformed limit already returned through `?`, so an empty list here means Z.ai sent
+    // only limit kinds this app does not meter.
     if lines.is_empty() {
-        if saw_recognized {
-            Err("Z.ai returned an invalid quota response.".into())
-        } else {
-            Ok(vec![MetricLine::no_data()])
-        }
-    } else {
-        Ok(lines)
+        return Ok(vec![MetricLine::no_data()]);
     }
+    Ok(lines)
 }
 
 fn token_line(entry: &Value) -> Result<Option<MetricLine>, String> {
