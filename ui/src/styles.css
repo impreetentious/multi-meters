@@ -30,6 +30,8 @@ button:disabled { cursor: default; opacity: 0.45; }
   --warning-text: #fde68a;
   --warning-bg: #78350f70;
   --warning-border: #f59e0b4d;
+  --success: #22c55e;
+  --star: #fbbf24;
   height: 100%;
   color: var(--text);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
@@ -60,6 +62,9 @@ button:disabled { cursor: default; opacity: 0.45; }
   --warning-text: #713f12;
   --warning-bg: #fef3c7;
   --warning-border: #fcd34d;
+  /* The dark shades of these two fall below the contrast floor on a light surface. */
+  --success: #15803d;
+  --star: #b45309;
   box-shadow: 0 18px 55px #0003;
 }
 
@@ -174,7 +179,7 @@ button:hover:not(:disabled) { background: var(--surface-hover); }
 .settings-list h3:first-child { margin-top: 1px; }
 .setting { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--border); }
 .setting.stacked { align-items: stretch; flex-direction: column; gap: 6px; }
-.setting em { margin-left: 5px; color: #22c55e; font-size: 10px; font-style: normal; }
+.setting em { margin-left: 5px; color: var(--success); font-size: 10px; font-style: normal; }
 .setting code { color: var(--muted); font-size: 11px; }
 input, select { max-width: 190px; color: var(--text); background: var(--field); border: 1px solid var(--border); border-radius: 7px; padding: 5px 7px; }
 input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
@@ -188,7 +193,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .provider-row button { min-width: 25px; padding: 2px 5px; }
 .metric-row { padding-left: 4px; color: var(--muted); font-size: 12px; }
 .metric-row select { max-width: 96px; padding: 3px 5px; font-size: 11px; }
-.star { min-width: 26px; padding: 2px 4px; color: #fbbf24; background: transparent; border: 0; font-size: 16px; }
+.star { min-width: 26px; padding: 2px 4px; color: var(--star); background: transparent; border: 0; font-size: 16px; }
 /* A metric that cannot be pinned still reserves the star's width, so every row's controls line up. */
 .star-gap { flex: 0 0 auto; width: 26px; }
 

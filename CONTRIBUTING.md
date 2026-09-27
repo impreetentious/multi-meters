@@ -28,6 +28,11 @@ toolchain.
 Provider icons live in `ui/public/icons` and are served from there; `resources/icons` holds only
 the 1024px app-icon master that `cargo tauri icon` generates the bundle icons from.
 
+The three files in `resources/pricing` are compiled into the binary and price local usage
+logs. Each one's `$comment` records where it came from and how to refresh it; bump its
+`retrieved_at`/`updated_at` in the same change. Models missing from all three are excluded
+from cost totals and named in the interface rather than guessed at.
+
 ## Pull requests
 
 Describe what changed, why it changed, how it was verified, and any remaining platform limitations. Keep unrelated refactors in separate pull requests.

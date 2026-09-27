@@ -492,6 +492,9 @@ function SettingsScreen({
   onError: (error: unknown) => void;
 }) {
   const [shortcut, setShortcut] = useState(settings.global_shortcut ?? "");
+  // Reset All Settings replaces the saved shortcut without unmounting this screen, so the
+  // field has to follow the setting rather than keep what it captured when it mounted.
+  useEffect(() => setShortcut(settings.global_shortcut ?? ""), [settings.global_shortcut]);
   const [openRouterKey, setOpenRouterKey] = useState("");
   const [zaiKey, setZaiKey] = useState("");
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -658,7 +661,12 @@ export default function App() {
 
   useEffect(() => {
     void load();
-    const interval = window.setInterval(() => void load(), 5_000);
+    // The flyout is hidden rather than destroyed, so an unguarded interval would keep
+    // polling all day. It exists to tick the footer countdown, which nobody can read
+    // while the window is hidden; `dashboard-updated` covers the refreshes that matter.
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 5_000);
     const unlistenDashboard = listen("dashboard-updated", () => void load());
     const unlistenNavigate = listen<string>("navigate", (event) => {
       if (["dash", "customize", "settings"].includes(event.payload)) setScreen(event.payload as Screen);

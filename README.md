@@ -15,7 +15,7 @@ It supports Claude, Codex, Cursor, GitHub Copilot, Devin, Grok, OpenCode, OpenRo
 
 ## Install
 
-Download an MSI or NSIS installer from the latest GitHub release and launch MultiMeters from the Windows tray.
+No binary release is published yet. Build the MSI and NSIS installers from source with `cargo tauri build` — see [Develop](#develop) — then launch MultiMeters from the Windows tray.
 
 MultiMeters discovers supported local app and CLI credentials automatically. OpenRouter and Z.ai keys can be added in Settings. Credentials never appear in the dashboard API.
 
@@ -25,10 +25,12 @@ Left-click the tray icon to toggle the dashboard. Right-click it for Open, Setti
 
 The flyout closes as soon as it loses focus. Turn off **Close When Unfocused** in Settings to keep it open beside your editor.
 
-The local API listens on `http://127.0.0.1:6736`. It exposes normalized usage at `/v1/limits` and the flyout's own line-by-line shape at `/v1/usage`; both accept a `/{provider}` suffix. The companion CLI prints the same data:
+The local API listens on `http://127.0.0.1:6736`. It exposes normalized usage at `/v1/limits` and the flyout's own line-by-line shape at `/v1/usage`; both accept a `/{provider}` suffix.
+
+A companion CLI prints the same normalized data. The installer does not bundle it — build it with `cargo build -p multimeters-cli --release` and run it from `target/release`:
 
 ```text
-MultiMeters [provider] [--force]
+multimeters [provider] [--force]
 ```
 
 ## Privacy
@@ -63,7 +65,7 @@ Build Windows installers with `cargo tauri build`.
 
 ## Contributing
 
-Issues and pull requests are welcome on [GitHub](https://github.com/ItsMonarch04/multi-meters). Bug and feature templates are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) for the checks a change is expected to leave green.
+Issues and pull requests are welcome on [GitHub](https://github.com/impreetentious/multi-meters). Bug and feature templates are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) for the checks a change is expected to leave green.
 
 ## License
 
@@ -71,4 +73,4 @@ Apache-2.0 © 2024-2026 Sidakpreet Singh — see [LICENSE](LICENSE).
 
 ---
 
-**Version:** v0.2.8
+**Version:** v0.2.9
