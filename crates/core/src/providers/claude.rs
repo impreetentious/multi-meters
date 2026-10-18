@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use reqwest::Method;
 use serde_json::{json, Value};
-use std::sync::Mutex;
 
 use super::{spend_widgets, widget, widget_labeled, Provider};
 use crate::http::Http;
@@ -14,7 +13,6 @@ use crate::spend;
 pub struct ClaudeProvider {
     info: ProviderInfo,
     widgets: Vec<WidgetDescriptor>,
-    rate_limited_until: Mutex<Option<chrono::DateTime<Utc>>>,
 }
 
 impl ClaudeProvider {
@@ -48,11 +46,7 @@ impl ClaudeProvider {
             ),
         ];
         widgets.extend(spend_widgets("claude"));
-        Self {
-            info,
-            widgets,
-            rate_limited_until: Mutex::new(None),
-        }
+        Self { info, widgets }
     }
 }
 
@@ -67,6 +61,10 @@ impl Provider for ClaudeProvider {
 
     async fn has_local_credentials(&self) -> bool {
         load_oauth().is_some() || std::env::var("CLAUDE_CODE_OAUTH_TOKEN").is_ok()
+    }
+
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(serde_json::to_vec(&load_oauth()?).ok()?)
     }
 
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
@@ -84,7 +82,8 @@ impl Provider for ClaudeProvider {
                 return ProviderSnapshot::err(
                     &self.info,
                     "Not logged in. Run `claude` to authenticate.",
-                );
+                )
+                .failed(FailureCategory::Authentication);
             }
         };
 
@@ -116,18 +115,9 @@ impl Provider for ClaudeProvider {
                     &self.info,
                     "Not logged in. Run `claude` to authenticate.",
                 )
+                .failed(FailureCategory::Authentication)
             }
         };
-
-        if let Some(until) = self
-            .rate_limited_until
-            .lock()
-            .ok()
-            .and_then(|guard| *guard)
-            .filter(|until| *until > Utc::now())
-        {
-            return rate_limited_snapshot(&self.info, &oauth, Some(until - Utc::now()));
-        }
 
         let res = match http
             .send(
@@ -154,23 +144,22 @@ impl Provider for ClaudeProvider {
         };
 
         if res.status == 429 {
-            let retry = parse_retry_after(&res).unwrap_or_else(|| Duration::minutes(5));
-            if let Ok(mut until) = self.rate_limited_until.lock() {
-                *until = Some(Utc::now() + retry);
-            }
-            return rate_limited_snapshot(&self.info, &oauth, Some(retry));
+            let retry = parse_retry_after(&res);
+            return rate_limited_snapshot(&self.info, &oauth, retry).with_http_failure(&res);
         }
         if res.status == 401 || res.status == 403 {
             return ProviderSnapshot::err(
                 &self.info,
                 "Session expired. Run `claude` to log in again.",
-            );
+            )
+            .with_http_failure(&res);
         }
         if !res.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Claude request failed (HTTP {}).", res.status),
-            );
+            )
+            .with_http_failure(&res);
         }
 
         let body = match res.json() {
@@ -182,10 +171,6 @@ impl Provider for ClaudeProvider {
                 )
             }
         };
-
-        if let Ok(mut until) = self.rate_limited_until.lock() {
-            *until = None;
-        }
 
         let mut lines = map_usage(&body);
         lines.extend(spend::claude_lines());
@@ -507,6 +492,7 @@ mod tests {
     #[test]
     fn parses_numeric_retry_after() {
         let response = crate::http::HttpResponse {
+            received_at: Utc::now(),
             status: 429,
             body: vec![],
             headers: std::collections::HashMap::from([("retry-after".into(), "120".into())]),

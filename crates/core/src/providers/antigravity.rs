@@ -61,6 +61,10 @@ impl Provider for AntigravityProvider {
         }
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(paths::cred_read_checked("gemini", Some("antigravity")).ok()??)
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         let mut auth = match load_auth() {
             Ok(Some(auth)) => auth,
@@ -69,8 +73,12 @@ impl Provider for AntigravityProvider {
                     &self.info,
                     "Start Antigravity or run `agy` and try again.",
                 )
+                .failed(FailureCategory::Authentication)
             }
-            Err(error) => return ProviderSnapshot::err(&self.info, &error),
+            Err(error) => {
+                return ProviderSnapshot::err(&self.info, &error)
+                    .failed(FailureCategory::Configuration)
+            }
         };
         if !auth.access_usable() {
             if auth.refresh.is_none() {
@@ -111,6 +119,7 @@ fn expired(info: &ProviderInfo) -> ProviderSnapshot {
         info,
         "Antigravity sign-in expired. Open Antigravity or run `agy` to refresh.",
     )
+    .failed(FailureCategory::Authentication)
 }
 
 fn unavailable(info: &ProviderInfo) -> ProviderSnapshot {

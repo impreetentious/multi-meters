@@ -224,6 +224,23 @@ pub struct WidgetDescriptor {
     pub default_on: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCategory {
+    RateLimit,
+    Authentication,
+    Configuration,
+    Transient,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshFailure {
+    pub category: FailureCategory,
+    pub status: Option<u16>,
+    pub retry_after_secs: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSnapshot {
     pub provider_id: String,
@@ -235,6 +252,10 @@ pub struct ProviderSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
     pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<RefreshFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_retry_at: Option<DateTime<Utc>>,
 }
 
 impl ProviderSnapshot {
@@ -250,6 +271,8 @@ impl ProviderSnapshot {
             refreshed_at: Utc::now(),
             warning: None,
             stale: false,
+            failure: None,
+            next_retry_at: None,
         }
     }
 
@@ -262,7 +285,23 @@ impl ProviderSnapshot {
             refreshed_at: Utc::now(),
             warning: None,
             stale: false,
+            failure: None,
+            next_retry_at: None,
         }
+    }
+
+    pub fn with_http_failure(mut self, response: &crate::http::HttpResponse) -> Self {
+        self.failure = response.refresh_failure();
+        self
+    }
+
+    pub fn failed(mut self, category: FailureCategory) -> Self {
+        self.failure = Some(RefreshFailure {
+            category,
+            status: None,
+            retry_after_secs: None,
+        });
+        self
     }
 
     pub fn line(&self, label: &str) -> Option<&MetricLine> {

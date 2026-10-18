@@ -21,6 +21,7 @@ pub struct AppEngine {
     providers: Vec<Arc<dyn Provider>>,
     inner: RwLock<Inner>,
     refresh_guard: Mutex<()>,
+    persist_cache: bool,
 }
 
 struct Inner {
@@ -29,6 +30,75 @@ struct Inner {
     errors: HashMap<String, String>,
     last_attempt: Option<Instant>,
     refreshing: bool,
+    retry: HashMap<String, RetryState>,
+    identities: HashMap<String, Option<Vec<u8>>>,
+    generation: u64,
+}
+
+#[derive(Default)]
+struct RetryState {
+    attempts: u32,
+    until: Option<Instant>,
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
+    paused: bool,
+    unbounded: bool,
+    last_attempt: Option<Instant>,
+}
+
+impl RetryState {
+    fn allows(&mut self, manual: bool, now: Instant, cadence: u64) -> bool {
+        if self.unbounded {
+            return false;
+        }
+        if self.until.is_some_and(|until| until > now) {
+            return false;
+        }
+        if !manual
+            && self.attempts == 0
+            && self.last_attempt.is_some_and(|attempt| {
+                now.saturating_duration_since(attempt) < Duration::from_secs(cadence)
+            })
+        {
+            return false;
+        }
+        if self.paused && !manual {
+            return false;
+        }
+        if manual {
+            self.paused = false;
+        }
+        true
+    }
+    fn fail(
+        &mut self,
+        failure: &RefreshFailure,
+        cadence: u64,
+        now: Instant,
+        wall: chrono::DateTime<chrono::Utc>,
+    ) {
+        if failure.category == FailureCategory::Superseded {
+            return;
+        }
+        self.paused = matches!(
+            failure.category,
+            FailureCategory::Authentication | FailureCategory::Configuration
+        );
+        if self.paused {
+            self.until = None;
+            self.deadline = None;
+            return;
+        }
+        let fallback = [60, 120, 240, 480, 900][(self.attempts as usize).min(4)];
+        let seconds = failure
+            .retry_after_secs
+            .map(|server| server.max(cadence))
+            .unwrap_or(fallback);
+        self.attempts = self.attempts.saturating_add(1);
+        self.until = now.checked_add(Duration::from_secs(seconds));
+        self.unbounded = self.until.is_none();
+        self.deadline = chrono::Duration::try_seconds(seconds.min(i64::MAX as u64) as i64)
+            .and_then(|duration| wall.checked_add_signed(duration));
+    }
 }
 
 impl AppEngine {
@@ -52,10 +122,14 @@ impl AppEngine {
                 settings,
                 snapshots,
                 errors: HashMap::new(),
+                retry: HashMap::new(),
+                identities: HashMap::new(),
+                generation: 0,
                 last_attempt: None,
                 refreshing: false,
             }),
             refresh_guard: Mutex::new(()),
+            persist_cache: true,
         }))
     }
 
@@ -157,6 +231,7 @@ impl AppEngine {
         settings.validate_values().map_err(anyhow::Error::msg)?;
         sanitize_settings(&mut settings, &self.providers);
         settings.save()?;
+        inner.generation = inner.generation.wrapping_add(1);
         inner.settings = settings.clone();
         Ok(settings)
     }
@@ -186,6 +261,7 @@ impl AppEngine {
             settings.hidden_metrics.remove(widget_id);
         }
         settings.save().map_err(|error| error.to_string())?;
+        inner.generation = inner.generation.wrapping_add(1);
         inner.settings = settings.clone();
         Ok(settings)
     }
@@ -214,6 +290,9 @@ impl AppEngine {
                 ),
             });
         }
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.retry.remove(provider_id);
+        inner.snapshots.remove(provider_id);
         inner.settings = settings.clone();
         Ok(settings)
     }
@@ -235,6 +314,7 @@ impl AppEngine {
         }
         sanitize_settings(&mut settings, &self.providers);
         settings.save()?;
+        inner.generation = inner.generation.wrapping_add(1);
         inner.settings = settings.clone();
         Ok(settings)
     }
@@ -248,7 +328,7 @@ impl AppEngine {
     /// caller can skip the work that only matters when the data changed.
     pub async fn refresh_all(&self, force: bool) -> bool {
         let _refresh_guard = self.refresh_guard.lock().await;
-        let enabled = {
+        let (enabled, generation) = {
             let mut inner = self.inner.write().await;
             if inner.refreshing {
                 return false;
@@ -257,7 +337,7 @@ impl AppEngine {
                 return false;
             }
             inner.refreshing = true;
-            inner.settings.enabled.clone()
+            (inner.settings.enabled.clone(), inner.generation)
         };
 
         let mut tasks = JoinSet::new();
@@ -265,12 +345,27 @@ impl AppEngine {
             if !enabled.contains(&provider.info().id) {
                 continue;
             }
+            let id = provider.info().id.clone();
+            let identity = provider.credential_identity();
+            {
+                let mut inner = self.inner.write().await;
+                synchronize_identity(&mut inner, &id, identity.clone());
+                let cadence = inner.settings.refresh_interval_secs();
+                if !inner.retry.entry(id.clone()).or_default().allows(
+                    force,
+                    Instant::now(),
+                    cadence,
+                ) {
+                    continue;
+                }
+            }
             let provider = Arc::clone(provider);
-            let http = self.http.clone();
+            let http = self.http.for_refresh();
             tasks.spawn(async move {
-                let id = provider.info().id.clone();
-                let snapshot = provider.refresh(&http).await;
-                (id, snapshot)
+                let mut snapshot = provider.refresh(&http).await;
+                annotate_failure(&mut snapshot, &http);
+                let current = provider.credential_identity();
+                (id, snapshot, identity, current)
             });
         }
 
@@ -284,15 +379,31 @@ impl AppEngine {
 
         let snapshots = {
             let mut inner = self.inner.write().await;
-            for (id, snapshot) in updates {
-                apply_refresh(&mut inner, id, snapshot);
+            for (id, snapshot, identity, current) in updates {
+                if inner.generation != generation {
+                    continue;
+                }
+                if identity != current
+                    || snapshot
+                        .failure
+                        .as_ref()
+                        .is_some_and(|f| f.category == FailureCategory::Superseded)
+                {
+                    inner.snapshots.remove(&id);
+                    inner.retry.remove(&id);
+                    inner.identities.insert(id, current);
+                    continue;
+                }
+                install_refresh(&mut inner, id, snapshot);
             }
             inner.last_attempt = Some(Instant::now());
             inner.refreshing = false;
             inner.snapshots.clone()
         };
-        if let Err(error) = save_cache(&snapshots) {
-            tracing::error!(%error, "could not save usage cache");
+        if self.persist_cache {
+            if let Err(error) = save_cache(&snapshots) {
+                tracing::error!(%error, "could not save usage cache");
+            }
         }
         true
     }
@@ -305,19 +416,55 @@ impl AppEngine {
             .find(|provider| provider.info().id == id)
             .cloned()
             .ok_or_else(|| "Unknown provider".to_string())?;
+        let identity = provider.credential_identity();
         if !force {
-            let inner = self.inner.read().await;
+            let mut inner = self.inner.write().await;
+            synchronize_identity(&mut inner, id, identity.clone());
             if inner.snapshots.get(id).is_some_and(snapshot_is_fresh) {
                 return Ok(());
             }
         }
-        let snapshot = provider.refresh(&self.http).await;
+        let generation = {
+            let mut inner = self.inner.write().await;
+            synchronize_identity(&mut inner, id, identity.clone());
+            let cadence = inner.settings.refresh_interval_secs();
+            if !inner.retry.entry(id.to_string()).or_default().allows(
+                force,
+                Instant::now(),
+                cadence,
+            ) {
+                return Ok(());
+            }
+            inner.generation
+        };
+        let http = self.http.for_refresh();
+        let mut snapshot = provider.refresh(&http).await;
+        annotate_failure(&mut snapshot, &http);
+        let current = provider.credential_identity();
         let snapshots = {
             let mut inner = self.inner.write().await;
-            apply_refresh(&mut inner, id.to_string(), snapshot);
+            if inner.generation != generation {
+                return Ok(());
+            }
+            if current != identity
+                || snapshot
+                    .failure
+                    .as_ref()
+                    .is_some_and(|f| f.category == FailureCategory::Superseded)
+            {
+                inner.snapshots.remove(id);
+                inner.retry.remove(id);
+                inner.identities.insert(id.to_string(), current);
+            } else {
+                install_refresh(&mut inner, id.to_string(), snapshot);
+            }
             inner.snapshots.clone()
         };
-        save_cache(&snapshots).map_err(|error| error.to_string())
+        if self.persist_cache {
+            save_cache(&snapshots).map_err(|error| error.to_string())
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn dashboard(&self) -> Dashboard {
@@ -626,10 +773,14 @@ impl AppEngine {
                 settings,
                 snapshots,
                 errors: HashMap::new(),
+                retry: HashMap::new(),
+                identities: HashMap::new(),
+                generation: 0,
                 last_attempt: None,
                 refreshing: false,
             }),
             refresh_guard: Mutex::new(()),
+            persist_cache: false,
         }
     }
 
@@ -657,6 +808,65 @@ impl AppEngine {
     }
 }
 
+fn annotate_failure(snapshot: &mut ProviderSnapshot, http: &Http) {
+    if !snapshot.is_error() {
+        return;
+    }
+    let observed = http.failure();
+    if let Some(failure) = &mut snapshot.failure {
+        if let Some(observed) = observed
+            .filter(|observed| failure.status.is_none() && observed.category == failure.category)
+        {
+            failure.status = observed.status;
+            failure.retry_after_secs = observed.retry_after_secs;
+        }
+    } else {
+        snapshot.failure = observed.or(Some(RefreshFailure {
+            category: FailureCategory::Transient,
+            status: None,
+            retry_after_secs: None,
+        }));
+    }
+}
+
+fn synchronize_identity(inner: &mut Inner, id: &str, identity: Option<Vec<u8>>) {
+    if inner
+        .identities
+        .get(id)
+        .is_some_and(|previous| previous != &identity)
+    {
+        if let Some(retry) = inner.retry.get_mut(id) {
+            retry.paused = false;
+            retry.last_attempt = None;
+            if retry.until.is_none() {
+                retry.attempts = 0;
+            }
+        }
+        inner.snapshots.remove(id);
+        inner.errors.remove(id);
+    }
+    inner.identities.insert(id.to_string(), identity);
+}
+
+fn install_refresh(inner: &mut Inner, id: String, mut snapshot: ProviderSnapshot) {
+    let state = inner.retry.entry(id.clone()).or_default();
+    if let Some(failure) = &snapshot.failure {
+        state.fail(
+            failure,
+            inner.settings.refresh_interval_secs(),
+            Instant::now(),
+            chrono::Utc::now(),
+        );
+        snapshot.next_retry_at = state.deadline;
+    } else {
+        *state = RetryState {
+            last_attempt: Some(Instant::now()),
+            ..RetryState::default()
+        };
+    }
+    apply_refresh(inner, id, snapshot);
+}
+
 fn apply_refresh(inner: &mut Inner, id: String, snapshot: ProviderSnapshot) {
     if let Some(message) = snapshot.error_message().map(str::to_owned) {
         inner.errors.insert(id.clone(), message.clone());
@@ -667,6 +877,8 @@ fn apply_refresh(inner: &mut Inner, id: String, snapshot: ProviderSnapshot) {
         {
             previous.warning = Some(message);
             previous.stale = true;
+            previous.failure = snapshot.failure;
+            previous.next_retry_at = snapshot.next_retry_at;
         } else {
             inner.snapshots.insert(id, snapshot);
         }
@@ -719,10 +931,26 @@ fn secs_until_refresh(inner: &Inner) -> i64 {
         .last_attempt
         .map(|attempt| attempt.elapsed().as_secs() as i64)
         .unwrap_or(interval);
-    (interval - elapsed).max(0)
+    let normal = (interval - elapsed).max(0);
+    let retry = inner
+        .settings
+        .enabled
+        .iter()
+        .filter_map(|id| inner.retry.get(id)?.until)
+        .map(|until| until.saturating_duration_since(Instant::now()).as_secs() as i64)
+        .min();
+    retry.map_or(normal, |retry| normal.min(retry))
 }
 
 fn refresh_is_fresh(inner: &Inner) -> bool {
+    if inner.settings.enabled.iter().any(|id| {
+        inner
+            .retry
+            .get(id)
+            .is_some_and(|state| state.until.is_some_and(|until| until <= Instant::now()))
+    }) {
+        return false;
+    }
     if let Some(last_attempt) = inner.last_attempt {
         return last_attempt.elapsed()
             < Duration::from_secs(inner.settings.refresh_interval_secs());
@@ -996,6 +1224,9 @@ mod tests {
             settings: AppSettings::default(),
             snapshots: HashMap::from([("claude".into(), good)]),
             errors: HashMap::new(),
+            retry: HashMap::new(),
+            identities: HashMap::new(),
+            generation: 0,
             last_attempt: None,
             refreshing: false,
         };
@@ -1263,6 +1494,9 @@ mod tests {
             },
             snapshots: HashMap::new(),
             errors: HashMap::new(),
+            retry: HashMap::new(),
+            identities: HashMap::new(),
+            generation: 0,
             last_attempt: Some(Instant::now()),
             refreshing: false,
         };
@@ -1273,5 +1507,193 @@ mod tests {
             (0..=60).contains(&due_in),
             "a shortened interval must shorten the wait, got {due_in}"
         );
+    }
+
+    #[test]
+    fn provider_cooldowns_are_monotonic_independent_and_manual_cannot_bypass_server_delay() {
+        let now = Instant::now();
+        let wall = Utc::now();
+        let failure = RefreshFailure {
+            category: FailureCategory::RateLimit,
+            status: Some(429),
+            retry_after_secs: Some(3600),
+        };
+        let mut limited = RetryState::default();
+        let mut other = RetryState::default();
+        limited.fail(&failure, 300, now, wall);
+        assert!(!limited.allows(true, now + Duration::from_secs(3599), 300));
+        assert!(other.allows(false, now, 300));
+        assert!(limited.allows(false, now + Duration::from_secs(3600), 300));
+        assert_eq!(limited.deadline, Some(wall + ChronoDuration::seconds(3600)));
+        assert!(
+            !limited.allows(true, now, 300),
+            "a changed wall clock cannot change the elapsed deadline"
+        );
+        let mut fallback = RetryState::default();
+        for seconds in [60, 120, 240, 480, 900, 900] {
+            fallback.fail(
+                &RefreshFailure {
+                    category: FailureCategory::Transient,
+                    status: None,
+                    retry_after_secs: None,
+                },
+                300,
+                now,
+                wall,
+            );
+            assert!(!fallback.allows(true, now + Duration::from_secs(seconds - 1), 300));
+            assert!(fallback.allows(true, now + Duration::from_secs(seconds), 300));
+        }
+        fallback.fail(
+            &RefreshFailure {
+                category: FailureCategory::Authentication,
+                status: Some(401),
+                retry_after_secs: None,
+            },
+            300,
+            now,
+            wall,
+        );
+        assert!(!fallback.allows(false, now + Duration::from_secs(9999), 300));
+        assert!(fallback.allows(true, now, 300));
+        fallback.fail(
+            &RefreshFailure {
+                category: FailureCategory::Configuration,
+                status: Some(400),
+                retry_after_secs: None,
+            },
+            300,
+            now,
+            wall,
+        );
+        assert!(!fallback.allows(false, now + Duration::from_secs(9999), 300));
+        assert!(fallback.allows(true, now, 300));
+    }
+
+    #[tokio::test]
+    async fn credential_changes_drop_prior_account_and_success_resets_backoff() {
+        let engine = stub_engine(stub_settings());
+        let mut inner = engine.inner.write().await;
+        inner.identities.insert("claude".into(), Some(vec![1]));
+        inner.retry.insert(
+            "claude".into(),
+            RetryState {
+                paused: true,
+                attempts: 4,
+                ..RetryState::default()
+            },
+        );
+        synchronize_identity(&mut inner, "claude", Some(vec![2]));
+        assert!(!inner.snapshots.contains_key("claude"));
+        assert!(!inner.retry["claude"].paused);
+        install_refresh(
+            &mut inner,
+            "claude".into(),
+            ProviderSnapshot::ok(
+                &stub_info(),
+                None,
+                vec![MetricLine::spend("Today", 1.0, 100.0, true)],
+            ),
+        );
+        assert_eq!(inner.retry["claude"].attempts, 0);
+        assert!(!inner.snapshots["claude"].stale);
+    }
+
+    struct CountingProvider {
+        info: ProviderInfo,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        limited: bool,
+    }
+    #[async_trait::async_trait]
+    impl Provider for CountingProvider {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+        fn widgets(&self) -> &[WidgetDescriptor] {
+            &[]
+        }
+        async fn has_local_credentials(&self) -> bool {
+            false
+        }
+        async fn refresh(&self, _http: &Http) -> ProviderSnapshot {
+            let count = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.limited && count == 0 {
+                let mut failed = ProviderSnapshot::err(&self.info, "fixture throttle");
+                failed.failure = Some(RefreshFailure {
+                    category: FailureCategory::RateLimit,
+                    status: Some(429),
+                    retry_after_secs: Some(3600),
+                });
+                failed
+            } else {
+                ProviderSnapshot::ok(
+                    &self.info,
+                    None,
+                    vec![MetricLine::spend("Today", 1.0, 100.0, true)],
+                )
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn mocked_provider_throttle_does_not_delay_others_and_manual_clicks_cannot_bypass_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let info = stub_info();
+        let mut other_info = stub_info();
+        other_info.id = "other".into();
+        let limited_calls = Arc::new(AtomicUsize::new(0));
+        let other_calls = Arc::new(AtomicUsize::new(0));
+        let engine = AppEngine::for_test(
+            vec![
+                Arc::new(CountingProvider {
+                    info: info.clone(),
+                    calls: limited_calls.clone(),
+                    limited: true,
+                }),
+                Arc::new(CountingProvider {
+                    info: other_info.clone(),
+                    calls: other_calls.clone(),
+                    limited: false,
+                }),
+            ],
+            AppSettings {
+                enabled: BTreeSet::from([info.id.clone(), other_info.id.clone()]),
+                order: vec![info.id.clone(), other_info.id.clone()],
+                ..AppSettings::default()
+            },
+            HashMap::from([(
+                info.id.clone(),
+                ProviderSnapshot::ok(
+                    &info,
+                    None,
+                    vec![MetricLine::spend("Today", 5.0, 50.0, true)],
+                ),
+            )]),
+        );
+        engine.refresh_all(true).await;
+        engine.refresh_all(true).await;
+        engine.refresh_one(&info.id, true).await.unwrap();
+        assert_eq!(limited_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(other_calls.load(Ordering::SeqCst), 2);
+        {
+            let inner = engine.inner.read().await;
+            let cached = &inner.snapshots[&info.id];
+            assert!(cached.stale);
+            assert!(cached.next_retry_at.is_some());
+            assert_eq!(cached.line("Today").unwrap().label(), "Today");
+        }
+        {
+            let mut inner = engine.inner.write().await;
+            inner.retry.get_mut(&info.id).unwrap().until =
+                Some(Instant::now() - Duration::from_secs(1));
+        }
+        engine.refresh_all(false).await;
+        assert_eq!(limited_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            other_calls.load(Ordering::SeqCst),
+            2,
+            "successful provider keeps its normal cadence"
+        );
+        assert_eq!(engine.inner.read().await.retry[&info.id].attempts, 0);
     }
 }

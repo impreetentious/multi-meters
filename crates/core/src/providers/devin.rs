@@ -53,6 +53,10 @@ impl Provider for DevinProvider {
         load_auth().is_some()
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(serde_json::to_vec(&load_auth()?).ok()?)
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         let auth = match load_auth() {
             Some(a) => a,
@@ -61,6 +65,7 @@ impl Provider for DevinProvider {
                     &self.info,
                     "Run `devin auth login` or sign in to Devin and try again.",
                 )
+                .failed(FailureCategory::Authentication)
             }
         };
         let url = format!(
@@ -93,13 +98,15 @@ impl Provider for DevinProvider {
             return ProviderSnapshot::err(
                 &self.info,
                 "Run `devin auth login` or sign in to Devin and try again.",
-            );
+            )
+            .with_http_failure(&res);
         }
         if !res.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Devin request failed (HTTP {}).", res.status),
-            );
+            )
+            .with_http_failure(&res);
         }
         let v = match res.json() {
             Some(v) => v,

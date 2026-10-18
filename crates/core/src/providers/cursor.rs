@@ -63,6 +63,13 @@ impl Provider for CursorProvider {
         load_tokens().is_some()
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        {
+            let tokens = load_tokens()?;
+            super::private_identity(serde_json::to_vec(&(tokens.0, tokens.1)).ok()?)
+        }
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         let mut tokens = match load_tokens() {
             Some(t) => t,
@@ -71,6 +78,7 @@ impl Provider for CursorProvider {
                     &self.info,
                     "Not logged in. Sign in via Cursor app or run `agent login`.",
                 )
+                .failed(FailureCategory::Authentication)
             }
         };
         if needs_refresh(&tokens.0) {
@@ -120,13 +128,15 @@ impl Provider for CursorProvider {
             return ProviderSnapshot::err(
                 &self.info,
                 "Session expired. Sign in via Cursor app or run `agent login`.",
-            );
+            )
+            .with_http_failure(&usage_res);
         }
         if !usage_res.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Cursor request failed (HTTP {}).", usage_res.status),
-            );
+            )
+            .with_http_failure(&usage_res);
         }
         let usage = match usage_res.json() {
             Some(v) => v,

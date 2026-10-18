@@ -21,6 +21,14 @@ pub trait Provider: Send + Sync {
     fn widgets(&self) -> &[WidgetDescriptor];
     async fn has_local_credentials(&self) -> bool;
     async fn refresh(&self, http: &Http) -> ProviderSnapshot;
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+pub(super) fn private_identity(bytes: impl AsRef<[u8]>) -> Option<Vec<u8>> {
+    use sha2::{Digest, Sha256};
+    Some(Sha256::digest(bytes).to_vec())
 }
 
 pub fn catalog() -> Vec<Arc<dyn Provider>> {

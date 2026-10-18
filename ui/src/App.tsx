@@ -294,6 +294,7 @@ function ProviderCard({
         )}
       </div>
       {provider.snapshot?.warning && <div className="warning-box">{provider.snapshot.warning}</div>}
+      {provider.snapshot?.next_retry_at && <div className="source-note">Next eligible retry: {new Date(provider.snapshot.next_retry_at).toLocaleString()}</div>}
       {provider.widgets.map((widget) => (
         <LineView
           key={widget.id}

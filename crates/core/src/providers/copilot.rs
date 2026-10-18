@@ -56,13 +56,18 @@ impl Provider for CopilotProvider {
         load_token().is_some()
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(load_token()?)
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         let token = match load_token() {
             Some(t) => t,
             None => return ProviderSnapshot::err(
                 &self.info,
                 "Sign in to GitHub Copilot in your editor, or run gh auth login, and try again.",
-            ),
+            )
+            .failed(FailureCategory::Authentication),
         };
         let res = match http
             .send(
@@ -93,13 +98,15 @@ impl Provider for CopilotProvider {
             return ProviderSnapshot::err(
                 &self.info,
                 "GitHub token invalid or expired. Re-authenticate (gh auth login) and try again.",
-            );
+            )
+            .with_http_failure(&res);
         }
         if !res.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Copilot usage request failed (HTTP {}).", res.status),
-            );
+            )
+            .with_http_failure(&res);
         }
         let body = match res.json() {
             Some(v) => v,

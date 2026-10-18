@@ -50,6 +50,10 @@ impl Provider for GrokProvider {
             .unwrap_or(false)
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(serde_json::to_vec(&load_entries()?.0).ok()?)
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         // One working copy for the whole sweep: a later entry's write must carry forward the
         // rotated credentials an earlier entry already persisted, not revert them.
@@ -57,6 +61,7 @@ impl Provider for GrokProvider {
             Some(v) => v,
             None => {
                 return ProviderSnapshot::err(&self.info, "Grok not logged in. Run `grok login`.")
+                    .failed(FailureCategory::Authentication)
             }
         };
         let mut saw_expired = false;
@@ -112,7 +117,8 @@ impl Provider for GrokProvider {
                 return ProviderSnapshot::err(
                     &self.info,
                     &format!("Grok billing request failed (HTTP {}).", credits.status),
-                );
+                )
+                .with_http_failure(&credits);
             }
             let body = match credits.json() {
                 Some(value) => value,
@@ -136,6 +142,7 @@ impl Provider for GrokProvider {
                 "Grok auth invalid. Run `grok login` again."
             },
         )
+        .failed(FailureCategory::Authentication)
     }
 }
 

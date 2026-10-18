@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{spend_widgets, widget, Provider};
 use crate::http::Http;
@@ -58,14 +58,32 @@ impl Provider for CodexProvider {
         load_auth().is_some()
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        use sha2::{Digest, Sha256};
+        let auth = load_auth()?;
+        Some(Sha256::digest(serde_json::to_vec(&auth).ok()?).to_vec())
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
-        let mut auth = match load_auth() {
+        self.refresh_from(http, &load_auth, true).await
+    }
+}
+
+impl CodexProvider {
+    async fn refresh_from(
+        &self,
+        http: &Http,
+        read_auth: &(dyn Fn() -> Option<Value> + Send + Sync),
+        include_spend: bool,
+    ) -> ProviderSnapshot {
+        let auth = match read_auth() {
             Some(v) => v,
             None => {
                 return ProviderSnapshot::err(
                     &self.info,
                     "Not logged in. Run `codex` to authenticate.",
                 )
+                .failed(FailureCategory::Authentication)
             }
         };
         if auth
@@ -74,21 +92,8 @@ impl Provider for CodexProvider {
             .is_none()
             && auth.get("OPENAI_API_KEY").is_some()
         {
-            return ProviderSnapshot::err(&self.info, "Usage not available for API key.");
-        }
-
-        if needs_refresh(&auth) {
-            if let Some(rt) = auth
-                .pointer("/tokens/refresh_token")
-                .and_then(|v| v.as_str())
-            {
-                if let Ok(fresh) = refresh_token(http, rt).await {
-                    apply_refresh(&mut auth, fresh);
-                    if let Err(error) = save_auth(&auth) {
-                        tracing::warn!(%error, "could not persist refreshed Codex credentials");
-                    }
-                }
-            }
+            return ProviderSnapshot::err(&self.info, "Usage not available for API key.")
+                .failed(FailureCategory::Configuration);
         }
 
         let token = match auth
@@ -101,8 +106,16 @@ impl Provider for CodexProvider {
                     &self.info,
                     "Not logged in. Run `codex` to authenticate.",
                 )
+                .failed(FailureCategory::Authentication)
             }
         };
+        if jwt_exp(&token).is_some_and(|expires| expires <= Utc::now()) {
+            return ProviderSnapshot::err(
+                &self.info,
+                "Session expired. Run `codex` to log in again.",
+            )
+            .failed(FailureCategory::Authentication);
+        }
         let account = auth
             .pointer("/tokens/account_id")
             .and_then(|v| v.as_str())
@@ -136,17 +149,26 @@ impl Provider for CodexProvider {
                 )
             }
         };
+        if read_auth().as_ref() != Some(&auth) {
+            return ProviderSnapshot::err(
+                &self.info,
+                "Codex credentials changed. Refresh to use the current account.",
+            )
+            .failed(FailureCategory::Superseded);
+        }
         if res.status == 401 || res.status == 403 {
             return ProviderSnapshot::err(
                 &self.info,
                 "Session expired. Run `codex` to log in again.",
-            );
+            )
+            .with_http_failure(&res);
         }
         if !res.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Codex request failed (HTTP {}).", res.status),
-            );
+            )
+            .with_http_failure(&res);
         }
         let header_percents = (
             res.header("x-codex-primary-used-percent")
@@ -182,12 +204,21 @@ impl Provider for CodexProvider {
             .await
             .ok();
 
+        if read_auth().as_ref() != Some(&auth) {
+            return ProviderSnapshot::err(
+                &self.info,
+                "Codex credentials changed. Refresh to use the current account.",
+            )
+            .failed(FailureCategory::Superseded);
+        }
         let reset_body = reset_res
             .as_ref()
             .filter(|response| response.ok())
             .and_then(|response| response.json());
         let mut lines = map_usage(&body, reset_body, header_percents, header_credits);
-        lines.extend(spend::codex_lines());
+        if include_spend {
+            lines.extend(spend::codex_lines());
+        }
         ProviderSnapshot::ok(&self.info, plan_name(&body), lines)
     }
 }
@@ -196,55 +227,6 @@ fn load_auth() -> Option<Value> {
     let path = paths::codex_home().join("auth.json");
     let text = paths::read_text(&path)?;
     serde_json::from_str(&text).ok()
-}
-
-fn save_auth(auth: &Value) -> anyhow::Result<()> {
-    let path = paths::codex_home().join("auth.json");
-    paths::write_secret_text(&path, &serde_json::to_string_pretty(auth)?)?;
-    Ok(())
-}
-
-fn needs_refresh(auth: &Value) -> bool {
-    let token = auth
-        .pointer("/tokens/access_token")
-        .and_then(|v| v.as_str());
-    match token.and_then(jwt_exp) {
-        Some(exp) => exp - Utc::now() <= Duration::minutes(5),
-        None => true,
-    }
-}
-
-async fn refresh_token(http: &Http, refresh: &str) -> anyhow::Result<Value> {
-    let body = format!(
-        "grant_type=refresh_token&client_id={}&refresh_token={}",
-        urlencoding::encode("app_EMoamEEZ73f0CkXaXp7hrann"),
-        urlencoding::encode(refresh)
-    );
-    let res = http
-        .send(
-            Method::POST,
-            "https://auth.openai.com/oauth/token",
-            &[("Content-Type", "application/x-www-form-urlencoded")],
-            Some(body.into_bytes()),
-            15,
-        )
-        .await?;
-    if !res.ok() {
-        anyhow::bail!("codex refresh {}", res.status);
-    }
-    res.json().ok_or_else(|| anyhow::anyhow!("bad body"))
-}
-
-fn apply_refresh(auth: &mut Value, fresh: Value) {
-    if let Some(t) = str_at(&fresh, "access_token") {
-        auth["tokens"]["access_token"] = json!(t);
-    }
-    if let Some(t) = str_at(&fresh, "refresh_token") {
-        auth["tokens"]["refresh_token"] = json!(t);
-    }
-    if let Some(t) = str_at(&fresh, "id_token") {
-        auth["tokens"]["id_token"] = json!(t);
-    }
 }
 
 fn plan_name(body: &Value) -> Option<String> {
@@ -510,5 +492,99 @@ mod tests {
         };
         assert_eq!(values[0].number, 32.84);
         assert_eq!(values[1].number, 821.0);
+    }
+
+    #[tokio::test]
+    async fn read_only_auth_handles_expiry_replacement_deletion_and_authorization() {
+        use base64::Engine as _;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let provider = CodexProvider::new();
+        let jwt = |expiry| {
+            format!(
+                "x.{}.x",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(format!("{{\"exp\":{expiry}}}"))
+            )
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "ehr-codex-fixture-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("auth.json");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let outcome = Arc::new(Mutex::new((200u16, false, false)));
+        let fixture = json!({"tokens":{"access_token":jwt(Utc::now().timestamp()+60), "account_id":"fixture-old", "refresh_token":"never-post"}});
+        let bytes = serde_json::to_vec(&fixture).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let read_path = path.clone();
+        let read = move || {
+            std::fs::read(&read_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        };
+        let mock_path = path.clone();
+        let count = calls.clone();
+        let current = outcome.clone();
+        let http = Http::mocked(move |method, _url| {
+            assert_eq!(method, Method::GET, "OAuth refresh POST is forbidden");
+            count.fetch_add(1, Ordering::SeqCst);
+            let (status, replace, delete) = *current.lock().unwrap();
+            if replace {
+                std::fs::write(
+                    &mock_path,
+                    br#"{"tokens":{"access_token":"new","account_id":"new"}}"#,
+                )
+                .unwrap();
+            }
+            if delete {
+                std::fs::remove_file(&mock_path).ok();
+            }
+            Ok(crate::http::HttpResponse { received_at: Utc::now(), status, body: br#"{"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}"#.to_vec(), headers: std::collections::HashMap::new() })
+        });
+        assert!(!provider.refresh_from(&http, &read, false).await.is_error());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        for status in [401, 403] {
+            *outcome.lock().unwrap() = (status, false, false);
+            let result = provider.refresh_from(&http, &read, false).await;
+            assert_eq!(
+                result.failure.unwrap().category,
+                FailureCategory::Authentication
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        for (replace, delete) in [(true, false), (false, true)] {
+            std::fs::write(&path, &bytes).unwrap();
+            *outcome.lock().unwrap() = (200, replace, delete);
+            assert_eq!(
+                provider
+                    .refresh_from(&http, &read, false)
+                    .await
+                    .failure
+                    .unwrap()
+                    .category,
+                FailureCategory::Superseded
+            );
+        }
+        *outcome.lock().unwrap() = (200, false, false);
+        let expired = json!({"tokens":{"access_token":jwt(Utc::now().timestamp()-1),"refresh_token":"never-post"}});
+        std::fs::write(&path, serde_json::to_vec(&expired).unwrap()).unwrap();
+        let before = calls.load(Ordering::SeqCst);
+        assert_eq!(
+            provider
+                .refresh_from(&http, &read, false)
+                .await
+                .failure
+                .unwrap()
+                .category,
+            FailureCategory::Authentication
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), before);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

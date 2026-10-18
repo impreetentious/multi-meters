@@ -73,6 +73,7 @@ export type DashboardProvider = {
     warning?: string;
     refreshed_at: string;
     stale: boolean;
+    next_retry_at?: string;
   } | null;
   enabled: boolean;
   expanded: boolean;
