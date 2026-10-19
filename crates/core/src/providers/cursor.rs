@@ -607,11 +607,13 @@ fn parse_csv_spend(csv: &str) -> Vec<MetricLine> {
             None
         };
         let e = days.entry(day).or_default();
+        e.tokens += tokens;
         if let Some(dollars) = carried_cost.or(estimated_cost) {
             e.dollars += dollars;
-            e.tokens += tokens;
-        } else if let Some(model) = model {
-            e.unknown_models.insert(model.to_string());
+            e.priced_tokens += tokens;
+        } else {
+            e.unknown_models
+                .insert(model.unwrap_or("Unknown model").to_string());
         }
     }
     crate::spend::period_lines(days)
@@ -701,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_csv_flags_unknown_models_without_mixing_unpriced_tokens_into_totals() {
+    fn cursor_csv_preserves_unknown_priced_tokens_with_separate_cost_coverage() {
         let csv = format!(
             "Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens\n\
              {},future-model-with-no-price,10,20,30,40\n",
@@ -718,6 +720,23 @@ mod tests {
             panic!("expected values")
         };
         assert_eq!(unknown_models, &["future-model-with-no-price"]);
-        assert!(values.iter().all(|value| value.number == 0.0));
+        assert_eq!(
+            values
+                .iter()
+                .find(|value| value.kind == MetricKind::Count)
+                .unwrap()
+                .number,
+            100.0
+        );
+        if let MetricLine::Values {
+            spend_coverage: Some(coverage),
+            ..
+        } = today
+        {
+            assert_eq!(coverage.dollars, None);
+            assert_eq!(coverage.priced_tokens, None);
+        } else {
+            panic!("missing coverage");
+        }
     }
 }

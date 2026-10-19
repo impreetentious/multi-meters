@@ -275,6 +275,7 @@ fn map_usage(
             color_hex: None,
             expiries_at: resets.1,
             unknown_models: vec![],
+            spend_coverage: None,
         });
     }
     if let Some(remaining) = read_credits(body, header_credits) {
@@ -299,6 +300,7 @@ fn map_usage(
             color_hex: None,
             expiries_at: vec![],
             unknown_models: vec![],
+            spend_coverage: None,
         });
     }
     lines

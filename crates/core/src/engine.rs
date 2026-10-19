@@ -14,7 +14,6 @@ use crate::models::*;
 use crate::paths;
 use crate::providers::{catalog, Provider};
 use crate::settings::AppSettings;
-use crate::spend::spend_from_lines;
 
 pub struct AppEngine {
     http: Http,
@@ -473,6 +472,7 @@ impl AppEngine {
         let mut dashboard_providers = Vec::new();
         let mut pins = Vec::new();
         let mut spend_slices = Vec::new();
+        let mut spend_coverage = Vec::new();
         let spend_label = period_label(&inner.settings.total_spend_period);
         let mut has_spend_provider = false;
 
@@ -548,18 +548,21 @@ impl AppEngine {
                 .any(|widget| widget.is_spend_tile && widget.metric_label == spend_label);
             has_spend_provider |= supports_spend;
             if supports_spend {
-                if let Some((dollars, tokens)) = snapshot
-                    .as_ref()
-                    .and_then(|snapshot| spend_from_lines(&snapshot.lines, spend_label))
-                {
+                let contribution = spend_contribution(&info, snapshot.as_ref(), spend_label);
+                if contribution.dollars.is_some() || contribution.observed_tokens.is_some() {
                     spend_slices.push(SpendSlice {
                         provider_id: info.id.clone(),
                         display_name: info.display_name.clone(),
-                        dollars,
-                        tokens,
+                        dollars: contribution.dollars.unwrap_or(0.0),
+                        tokens: contribution.observed_tokens.unwrap_or(0.0),
+                        comparable_dollars: contribution.comparable_dollars,
+                        comparable_tokens: contribution.comparable_tokens,
+                        stale: contribution.stale,
+                        estimated: contribution.estimated,
                         color: provider_color(&info.id).to_string(),
                     });
                 }
+                spend_coverage.push(contribution);
             }
 
             dashboard_providers.push(DashboardProvider {
@@ -573,12 +576,27 @@ impl AppEngine {
         }
 
         let total_spend = if inner.settings.show_total_spend && has_spend_provider {
-            let dollars = spend_slices.iter().map(|slice| slice.dollars).sum::<f64>();
-            let tokens = spend_slices.iter().map(|slice| slice.tokens).sum::<f64>();
+            let dollars = sum_known(spend_coverage.iter().map(|c| c.dollars));
+            let tokens = sum_known(spend_coverage.iter().map(|c| c.observed_tokens));
+            let comparable_dollars = spend_coverage
+                .iter()
+                .filter_map(|c| c.comparable_dollars)
+                .sum::<f64>();
+            let comparable_tokens = spend_coverage
+                .iter()
+                .filter_map(|c| c.comparable_tokens)
+                .sum::<f64>();
+            let excluded_tokens = spend_coverage
+                .iter()
+                .filter_map(|c| {
+                    c.observed_tokens
+                        .map(|observed| (observed - c.comparable_tokens.unwrap_or(0.0)).max(0.0))
+                })
+                .sum();
             let metric = inner.settings.total_spend_metric.clone();
             spend_slices.retain(|slice| match metric.as_str() {
                 "tokens" => slice.tokens > 0.0,
-                "cost_per_million" => slice.tokens > 0.0 && slice.dollars > 0.0,
+                "cost_per_million" => slice.comparable_tokens.is_some_and(|tokens| tokens > 0.0),
                 _ => slice.dollars > 0.0,
             });
             spend_slices.sort_by(|left, right| {
@@ -589,12 +607,25 @@ impl AppEngine {
                 metric: metric.clone(),
                 value: match metric.as_str() {
                     "tokens" => tokens,
-                    "cost_per_million" if tokens > 0.0 => dollars / tokens * 1_000_000.0,
-                    "cost_per_million" => 0.0,
+                    "cost_per_million" if comparable_tokens > 0.0 => {
+                        Some(comparable_dollars / comparable_tokens * 1_000_000.0)
+                    }
+                    "cost_per_million" => None,
                     _ => dollars,
                 },
                 dollars,
                 tokens,
+                comparable_dollars,
+                comparable_tokens,
+                excluded_tokens,
+                partial: spend_coverage.iter().any(|c| {
+                    c.state == "unavailable"
+                        || c.state == "unpriced"
+                        || (metric == "tokens" && c.observed_tokens.is_none())
+                        || (metric == "cost_per_million" && c.comparable_tokens.is_none())
+                }),
+                stale: spend_coverage.iter().any(|c| c.stale),
+                coverage: spend_coverage,
                 slices: spend_slices,
             })
         } else {
@@ -829,6 +860,104 @@ fn annotate_failure(snapshot: &mut ProviderSnapshot, http: &Http) {
     }
 }
 
+fn sum_known(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+    let known: Vec<_> = values.flatten().collect();
+    if known.is_empty() {
+        None
+    } else {
+        Some(known.iter().sum())
+    }
+}
+
+fn spend_contribution(
+    info: &ProviderInfo,
+    snapshot: Option<&ProviderSnapshot>,
+    label: &str,
+) -> SpendContribution {
+    let mut result = SpendContribution {
+        provider_id: info.id.clone(),
+        display_name: info.display_name.clone(),
+        state: "unavailable".into(),
+        stale: snapshot.is_some_and(|s| s.stale),
+        estimated: false,
+        refreshed_at: snapshot.map(|s| s.refreshed_at),
+        dollars: None,
+        observed_tokens: None,
+        comparable_dollars: None,
+        comparable_tokens: None,
+        unknown_models: vec![],
+    };
+    let Some(MetricLine::Values {
+        values,
+        unknown_models,
+        spend_coverage,
+        ..
+    }) = snapshot.and_then(|s| s.line(label))
+    else {
+        return result;
+    };
+    result.unknown_models = unknown_models.clone();
+    result.estimated = values.iter().any(|v| v.estimated);
+    if let Some(coverage) = spend_coverage {
+        if !coverage.observed_tokens.is_finite()
+            || coverage.observed_tokens < 0.0
+            || coverage.dollars.is_some_and(|v| !v.is_finite() || v < 0.0)
+            || coverage
+                .priced_tokens
+                .is_some_and(|v| !v.is_finite() || v < 0.0 || v > coverage.observed_tokens)
+        {
+            return result;
+        }
+        result.stale |= coverage.stale;
+        result.estimated |= coverage.estimated;
+        result.observed_tokens = Some(coverage.observed_tokens);
+        result.dollars = coverage.dollars;
+        if let (Some(dollars), Some(tokens)) = (coverage.dollars, coverage.priced_tokens) {
+            result.comparable_dollars = Some(dollars);
+            result.comparable_tokens = Some(tokens);
+        }
+        result.state = if !coverage.complete {
+            "unavailable"
+        } else if !unknown_models.is_empty()
+            || coverage
+                .priced_tokens
+                .is_none_or(|tokens| tokens < coverage.observed_tokens)
+        {
+            "unpriced"
+        } else if coverage.dollars == Some(0.0) && coverage.observed_tokens == 0.0 {
+            "confirmed_zero"
+        } else {
+            "known"
+        }
+        .into();
+    } else {
+        result.dollars = values
+            .iter()
+            .find(|v| v.kind == MetricKind::Dollars)
+            .map(|v| v.number)
+            .filter(|v| v.is_finite() && *v >= 0.0);
+        result.observed_tokens = values
+            .iter()
+            .find(|v| v.kind == MetricKind::Count && v.label.as_deref() == Some("tokens"))
+            .map(|v| v.number)
+            .filter(|v| v.is_finite() && *v >= 0.0);
+        if result.dollars.is_some() || result.observed_tokens.is_some() {
+            result.state = if unknown_models.is_empty() {
+                "known"
+            } else {
+                "unpriced"
+            }
+            .into();
+        }
+        if unknown_models.is_empty() && result.dollars.is_some() && result.observed_tokens.is_some()
+        {
+            result.comparable_dollars = result.dollars;
+            result.comparable_tokens = result.observed_tokens;
+        }
+    }
+    result
+}
+
 fn synchronize_identity(inner: &mut Inner, id: &str, identity: Option<Vec<u8>>) {
     if inner
         .identities
@@ -974,7 +1103,10 @@ fn period_label(period: &str) -> &'static str {
 fn slice_value(slice: &SpendSlice, metric: &str) -> f64 {
     match metric {
         "tokens" => slice.tokens,
-        "cost_per_million" if slice.tokens > 0.0 => slice.dollars / slice.tokens * 1_000_000.0,
+        "cost_per_million" if slice.comparable_tokens.is_some_and(|tokens| tokens > 0.0) => {
+            slice.comparable_dollars.unwrap_or(0.0) / slice.comparable_tokens.unwrap_or(1.0)
+                * 1_000_000.0
+        }
         "cost_per_million" => 0.0,
         _ => slice.dollars,
     }
@@ -1568,6 +1700,92 @@ mod tests {
         );
         assert!(!fallback.allows(false, now + Duration::from_secs(9999), 300));
         assert!(fallback.allows(true, now, 300));
+    }
+
+    #[tokio::test]
+    async fn aggregate_coverage_preserves_subtotals_stale_values_and_exact_priced_token_ratio() {
+        let info = stub_info();
+        let mut second = stub_info();
+        second.id = "codex".into();
+        second.display_name = "Codex".into();
+        let mut widget = stub_widget("claude.today", "Today");
+        widget.is_spend_tile = true;
+        let mut second_widget = widget.clone();
+        second_widget.provider_id = second.id.clone();
+        second_widget.id = "codex.today".into();
+        let mut line = MetricLine::spend("Today", 2.0, 2000.0, true);
+        if let MetricLine::Values {
+            unknown_models,
+            spend_coverage,
+            ..
+        } = &mut line
+        {
+            unknown_models.push("unpriced-model".into());
+            *spend_coverage = Some(SpendCoverage {
+                observed_tokens: 2000.0,
+                priced_tokens: Some(1000.0),
+                dollars: Some(2.0),
+                complete: true,
+                stale: false,
+                estimated: true,
+            });
+        }
+        let mut known = ProviderSnapshot::ok(&info, None, vec![line]);
+        known.stale = true;
+        let engine = AppEngine::for_test(
+            vec![
+                Arc::new(StubProvider {
+                    info: info.clone(),
+                    widgets: vec![widget],
+                }),
+                Arc::new(StubProvider {
+                    info: second.clone(),
+                    widgets: vec![second_widget],
+                }),
+            ],
+            AppSettings {
+                enabled: BTreeSet::from([info.id.clone(), second.id.clone()]),
+                order: vec![info.id.clone(), second.id.clone()],
+                show_total_spend: true,
+                total_spend_metric: "cost_per_million".into(),
+                ..AppSettings::default()
+            },
+            HashMap::from([
+                (info.id.clone(), known),
+                (second.id.clone(), ProviderSnapshot::err(&second, "offline")),
+            ]),
+        );
+        let total = engine.dashboard().await.total_spend.unwrap();
+        assert_eq!(total.dollars, Some(2.0));
+        assert_eq!(total.tokens, Some(2000.0));
+        assert_eq!(total.value, Some(2000.0));
+        assert_eq!(total.excluded_tokens, 1000.0);
+        assert!(total.partial && total.stale);
+        assert!(total.slices[0].stale);
+        assert_eq!(total.coverage[1].state, "unavailable");
+        let mut inner = engine.inner.write().await;
+        inner.settings.total_spend_metric = "cost".into();
+        inner
+            .snapshots
+            .insert(info.id.clone(), ProviderSnapshot::err(&info, "offline"));
+        drop(inner);
+        let total = engine.dashboard().await.total_spend.unwrap();
+        assert_eq!(total.value, None);
+        assert!(total.slices.is_empty());
+        let mut inner = engine.inner.write().await;
+        inner.snapshots.insert(
+            info.id.clone(),
+            ProviderSnapshot::ok(
+                &info,
+                None,
+                vec![MetricLine::spend("Today", 0.0, 0.0, true)],
+            ),
+        );
+        inner.settings.enabled.remove(&second.id);
+        drop(inner);
+        let total = engine.dashboard().await.total_spend.unwrap();
+        assert_eq!(total.value, Some(0.0));
+        assert_eq!(total.coverage[0].state, "confirmed_zero");
     }
 
     #[tokio::test]

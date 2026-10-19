@@ -42,6 +42,16 @@ pub struct ChartPoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpendCoverage {
+    pub observed_tokens: f64,
+    pub priced_tokens: Option<f64>,
+    pub dollars: Option<f64>,
+    pub complete: bool,
+    pub stale: bool,
+    pub estimated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MetricLine {
     Text {
@@ -61,6 +71,8 @@ pub enum MetricLine {
         expiries_at: Vec<DateTime<Utc>>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         unknown_models: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spend_coverage: Option<SpendCoverage>,
     },
     Progress {
         label: String,
@@ -152,6 +164,7 @@ impl MetricLine {
             color_hex: None,
             expiries_at: vec![],
             unknown_models: vec![],
+            spend_coverage: None,
         }
     }
 
@@ -175,6 +188,14 @@ impl MetricLine {
             color_hex: None,
             expiries_at: vec![],
             unknown_models: vec![],
+            spend_coverage: Some(SpendCoverage {
+                observed_tokens: tokens,
+                priced_tokens: Some(tokens),
+                dollars: Some(dollars),
+                complete: true,
+                stale: false,
+                estimated,
+            }),
         }
     }
 
@@ -413,10 +434,31 @@ pub struct Pin {
 pub struct TotalSpend {
     pub period: String,
     pub metric: String,
-    pub value: f64,
-    pub dollars: f64,
-    pub tokens: f64,
+    pub value: Option<f64>,
+    pub dollars: Option<f64>,
+    pub tokens: Option<f64>,
+    pub comparable_dollars: f64,
+    pub comparable_tokens: f64,
+    pub excluded_tokens: f64,
+    pub partial: bool,
+    pub stale: bool,
+    pub coverage: Vec<SpendContribution>,
     pub slices: Vec<SpendSlice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpendContribution {
+    pub provider_id: String,
+    pub display_name: String,
+    pub state: String,
+    pub stale: bool,
+    pub estimated: bool,
+    pub refreshed_at: Option<DateTime<Utc>>,
+    pub dollars: Option<f64>,
+    pub observed_tokens: Option<f64>,
+    pub comparable_dollars: Option<f64>,
+    pub comparable_tokens: Option<f64>,
+    pub unknown_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -426,6 +468,10 @@ pub struct SpendSlice {
     pub dollars: f64,
     pub tokens: f64,
     pub color: String,
+    pub comparable_dollars: Option<f64>,
+    pub comparable_tokens: Option<f64>,
+    pub stale: bool,
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

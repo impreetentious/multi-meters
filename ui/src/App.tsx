@@ -184,7 +184,8 @@ function LineView({
     );
   }
   if (line.type === "values") {
-    const text = line.values.map(formatMetricValue).join(" · ");
+    const text = [line.spend_coverage?.dollars === null ? "Cost unavailable" : "",
+      ...line.values.filter((value) => !(value.kind === "dollars" && line.spend_coverage?.dollars === null)).map(formatMetricValue)].filter(Boolean).join(" · ");
     return (
       <div className="row">
         <div className="row-h">
@@ -198,7 +199,7 @@ function LineView({
         )}
         {line.unknown_models && line.unknown_models.length > 0 && (
           <div className="source-note" title={line.unknown_models.join(", ")}>
-            Totals exclude {line.unknown_models.length} model{line.unknown_models.length === 1 ? "" : "s"} with unavailable pricing
+            {line.spend_coverage?.stale ? "Stale reading. " : ""}Cost excludes {line.unknown_models.length} model{line.unknown_models.length === 1 ? "" : "s"} with unavailable pricing; measured tokens remain included
           </div>
         )}
       </div>
@@ -329,7 +330,7 @@ function ProviderCard({
 
 function sliceMetric(slice: SpendSlice, metric: Settings["total_spend_metric"]) {
   if (metric === "tokens") return slice.tokens;
-  if (metric === "cost_per_million") return slice.tokens > 0 ? (slice.dollars / slice.tokens) * 1_000_000 : 0;
+  if (metric === "cost_per_million") return slice.comparable_tokens && slice.comparable_dollars !== null ? (slice.comparable_dollars / slice.comparable_tokens) * 1_000_000 : 0;
   return slice.dollars;
 }
 
@@ -337,7 +338,7 @@ function sliceMetric(slice: SpendSlice, metric: Settings["total_spend_metric"]) 
 // is meaningful. A blended rate is not — rates do not sum — so under Cost / MTok the ring shows
 // the token volume the rates are averaged over, and the legend carries each provider's rate.
 function sliceWeight(slice: SpendSlice, metric: Settings["total_spend_metric"]) {
-  return metric === "cost" ? slice.dollars : slice.tokens;
+  return metric === "cost" ? slice.dollars : metric === "cost_per_million" ? (slice.comparable_tokens ?? 0) : slice.tokens;
 }
 
 function TotalSpendCard({
@@ -350,14 +351,20 @@ function TotalSpendCard({
   onPatch: (patch: Partial<Settings>) => Promise<void>;
 }) {
   const sum = total.slices.reduce((value, slice) => value + sliceWeight(slice, total.metric), 0);
-  const center =
+  const center = total.value === null ? "Unavailable" :
     total.metric === "tokens"
       ? `${fmtNum(total.value)} tokens`
       : total.metric === "cost_per_million"
         ? `${fmtMoney(total.value)} / MTok`
         : fmtMoney(total.value);
+  const displayCenter = `${center}${total.partial ? " subtotal" : ""}${total.stale ? " (stale)" : ""}`;
   const shareOf = total.metric === "cost" ? "cost" : "tokens";
-  const ringLabel = `Share of ${shareOf} by provider: ${total.slices
+  const coverageText = total.coverage.map((entry) => {
+    const status = entry.state === "unavailable" ? "unavailable" : entry.state === "confirmed_zero" ? "confirmed zero" : entry.state === "unpriced" ? "partly unpriced" : "known";
+    return `${entry.display_name}: ${status}${total.metric === "cost_per_million" && entry.comparable_tokens === null ? ", excluded from Cost / MTok" : ""}${total.metric === "tokens" && entry.observed_tokens === null ? ", token total unavailable" : ""}${entry.stale ? ", stale" : ""}${entry.estimated ? ", estimated cost" : ""}${entry.unknown_models.length ? ` (${entry.unknown_models.join(", ")})` : ""}`;
+  }).join("; ");
+  const exclusionText = total.metric === "cost_per_million" ? `${fmtNum(total.excluded_tokens)} observed tokens excluded from Cost / MTok; only matched priced contributions are comparable.` : "";
+  const ringLabel = `${coverageText}. ${exclusionText} Share of ${shareOf} by provider: ${total.slices
     .map((slice) => `${slice.display_name} ${Math.round((sliceWeight(slice, total.metric) / (sum || 1)) * 100)}%`)
     .join(", ")}`;
   return (
@@ -378,7 +385,7 @@ function TotalSpendCard({
         </div>
       </div>
       {total.slices.length === 0 ? (
-        <div className="empty compact">No usage for this period.</div>
+        <div className="empty compact">{displayCenter}</div>
       ) : (
         <div className="ring-wrap">
           <div className="ring-stack">
@@ -408,11 +415,11 @@ function TotalSpendCard({
             </svg>
           </div>
           <div className="spend-summary">
-            <div className="total-value">{center}</div>
+            <div className="total-value">{displayCenter}</div>
             {total.slices.map((slice) => (
               <div className="legend" key={slice.provider_id}>
                 <i style={{ background: slice.color }} />
-                <b>{slice.display_name}</b>
+                <b>{slice.display_name}{slice.stale ? " (stale)" : ""}</b>
                 <span>
                   {total.metric === "tokens"
                     ? fmtNum(slice.tokens)
@@ -425,9 +432,8 @@ function TotalSpendCard({
           </div>
         </div>
       )}
-      {total.metric === "cost_per_million" && total.slices.length > 0 && (
-        <div className="source-note">Ring shows each provider's share of tokens; the rate is a blended average.</div>
-      )}
+      <div className="source-note">{coverageText}</div>
+      {total.metric === "cost_per_million" && <div className="source-note">{exclusionText} Ring shows the comparable priced token share.</div>}
     </section>
   );
 }

@@ -5,6 +5,9 @@ export type MetricValue = {
   estimated?: boolean;
 };
 
+export type SpendCoverage = { observed_tokens: number; priced_tokens: number | null; dollars: number | null; complete: boolean; stale: boolean; estimated: boolean };
+export type SpendContribution = { provider_id: string; display_name: string; state: string; stale: boolean; estimated: boolean; refreshed_at: string | null; dollars: number | null; observed_tokens: number | null; comparable_dollars: number | null; comparable_tokens: number | null; unknown_models: string[] };
+
 export type MetricLine =
   | {
       type: "progress";
@@ -23,6 +26,7 @@ export type MetricLine =
       color_hex?: string;
       expiries_at?: string[];
       unknown_models?: string[];
+      spend_coverage?: SpendCoverage;
     }
   | { type: "badge"; label: string; text: string; color_hex?: string; subtitle?: string }
   | { type: "text"; label: string; value: string; color_hex?: string; subtitle?: string }
@@ -87,6 +91,10 @@ export type SpendSlice = {
   dollars: number;
   tokens: number;
   color: string;
+  comparable_dollars: number | null;
+  comparable_tokens: number | null;
+  stale: boolean;
+  estimated: boolean;
 };
 
 export type Dashboard = {
@@ -102,9 +110,15 @@ export type Dashboard = {
   total_spend: {
     period: "today" | "yesterday" | "last30";
     metric: "cost" | "tokens" | "cost_per_million";
-    value: number;
-    dollars: number;
-    tokens: number;
+    value: number | null;
+    dollars: number | null;
+    tokens: number | null;
+    comparable_dollars: number;
+    comparable_tokens: number;
+    excluded_tokens: number;
+    partial: boolean;
+    stale: boolean;
+    coverage: SpendContribution[];
     slices: SpendSlice[];
   } | null;
   next_refresh_in_secs: number;

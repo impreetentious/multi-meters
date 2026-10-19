@@ -61,13 +61,21 @@ impl Provider for ZaiProvider {
         }
     }
 
+    fn credential_identity(&self) -> Option<Vec<u8>> {
+        super::private_identity(load_key().ok()??)
+    }
+
     async fn refresh(&self, http: &Http) -> ProviderSnapshot {
         let key = match load_key() {
             Ok(Some(key)) => key,
             Ok(None) => {
                 return ProviderSnapshot::err(&self.info, "Add a Z.ai API key in Settings.")
+                    .failed(FailureCategory::Authentication)
             }
-            Err(error) => return ProviderSnapshot::err(&self.info, &error),
+            Err(error) => {
+                return ProviderSnapshot::err(&self.info, &error)
+                    .failed(FailureCategory::Configuration)
+            }
         };
         let auth = [("Authorization", format!("Bearer {key}"))];
         let hdr: Vec<(&str, &str)> = auth.iter().map(|(k, v)| (*k, v.as_str())).collect();
@@ -84,13 +92,15 @@ impl Provider for ZaiProvider {
             }
         };
         if quota.status == 401 || quota.status == 403 {
-            return ProviderSnapshot::err(&self.info, "Z.ai API key is invalid.");
+            return ProviderSnapshot::err(&self.info, "Z.ai API key is invalid.")
+                .with_http_failure(&quota);
         }
         if !quota.ok() {
             return ProviderSnapshot::err(
                 &self.info,
                 &format!("Z.ai request failed (HTTP {}).", quota.status),
-            );
+            )
+            .with_http_failure(&quota);
         }
         let body = match quota.json() {
             Some(v) => v,

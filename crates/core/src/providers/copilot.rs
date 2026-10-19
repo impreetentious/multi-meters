@@ -310,6 +310,7 @@ fn overage_line(raw: Option<&Value>) -> Option<MetricLine> {
         color_hex: None,
         expiries_at: vec![],
         unknown_models: vec![],
+        spend_coverage: None,
     })
 }
 
@@ -420,6 +421,7 @@ fn map_org_billing(body: &Value) -> Option<Vec<MetricLine>> {
             color_hex: None,
             expiries_at: vec![],
             unknown_models: vec![],
+            spend_coverage: None,
         },
         MetricLine::values_dollars("Org Spend", spend),
     ])

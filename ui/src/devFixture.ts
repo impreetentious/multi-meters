@@ -2,7 +2,7 @@
 // the same commands as src-tauri with plausible data so the flyout can be built and reviewed on
 // any OS. `bridge.ts` only reaches for it under `import.meta.env.DEV`, so it is tree-shaken out
 // of production bundles.
-import type { CustomizeData, Dashboard, MetricLine, Pace, Settings, SpendSlice, WidgetDescriptor } from "./types";
+import type { CustomizeData, Dashboard, MetricLine, Pace, Settings, SpendSlice, SpendContribution, WidgetDescriptor } from "./types";
 
 const HOUR = 3_600_000;
 const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
@@ -321,6 +321,7 @@ function dashboard(): Dashboard {
 
   const pins: Dashboard["pins"] = [];
   const slices: SpendSlice[] = [];
+  const coverage: SpendContribution[] = [];
   let hasSpendProvider = false;
 
   const providers = ordered.map((provider) => {
@@ -360,9 +361,20 @@ function dashboard(): Dashboard {
         dollars: spendWidget.line.values[0]?.number ?? 0,
         tokens: spendWidget.line.values[1]?.number ?? 0,
         color: PROVIDER_COLORS[provider.id] ?? "#737373",
+        comparable_dollars: spendWidget.line.values[0]?.number ?? null,
+        comparable_tokens: spendWidget.line.values[1]?.number ?? null,
+        stale: !!provider.stale, estimated: true,
       });
     }
 
+    if (spendWidget) {
+      const slice = slices.find((entry) => entry.provider_id === provider.id);
+      coverage.push({ provider_id: provider.id, display_name: provider.displayName,
+        state: slice ? (slice.dollars === 0 && slice.tokens === 0 ? "confirmed_zero" : "known") : "unavailable",
+        stale: !!provider.stale, estimated: true, refreshed_at: new Date(lastRefresh).toISOString(),
+        dollars: slice?.dollars ?? null, observed_tokens: slice?.tokens ?? null,
+        comparable_dollars: slice?.comparable_dollars ?? null, comparable_tokens: slice?.comparable_tokens ?? null, unknown_models: [] });
+    }
     return {
       info: { id: provider.id, display_name: provider.displayName, icon: provider.icon, links: provider.links },
       snapshot: {
@@ -400,10 +412,12 @@ function dashboard(): Dashboard {
                 : metric === "cost_per_million"
                   ? tokens > 0
                     ? (dollars / tokens) * 1e6
-                    : 0
+                    : null
                   : dollars,
             dollars,
             tokens,
+            comparable_dollars: dollars, comparable_tokens: tokens, excluded_tokens: 0,
+            partial: coverage.some((entry) => entry.state === "unavailable"), stale: coverage.some((entry) => entry.stale), coverage,
             slices: kept,
           }
         : null,

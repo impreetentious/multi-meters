@@ -19,6 +19,12 @@ pub fn snapshot(snapshot: &ProviderSnapshot) -> Value {
     if let Some(warning) = &snapshot.warning {
         output.insert("warning".into(), json!(warning));
     }
+    if let Some(next) = snapshot.next_retry_at {
+        output.insert("nextRetryAt".into(), json!(next));
+    }
+    if let Some(failure) = &snapshot.failure {
+        output.insert("failure".into(), json!(failure));
+    }
     Value::Object(output)
 }
 
@@ -40,6 +46,7 @@ fn metric_line(line: &MetricLine) -> Value {
             color_hex,
             expiries_at,
             unknown_models,
+            spend_coverage,
         } => {
             let mut value = json!({
                 "type": "values",
@@ -56,6 +63,9 @@ fn metric_line(line: &MetricLine) -> Value {
             }
             if !unknown_models.is_empty() {
                 value["unknownModels"] = json!(unknown_models);
+            }
+            if let Some(coverage) = spend_coverage {
+                value["spendCoverage"] = json!(coverage);
             }
             value
         }
